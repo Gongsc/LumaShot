@@ -28,6 +28,29 @@ bool ContainsPoint(RectI value, int x, int y) noexcept {
     return x >= value.left && x < value.right && y >= value.top && y < value.bottom;
 }
 
+RectI PlaceToolbar(RectI selection, RectI monitorBounds, int width, int height, int margin) noexcept {
+    width = std::max(1, width);
+    height = std::max(1, height);
+    margin = std::max(0, margin);
+    RectI visibleSelection = IntersectRectangles(NormalizeRect(selection), monitorBounds);
+    if (visibleSelection.empty()) visibleSelection = monitorBounds;
+
+    const int availableLeft = monitorBounds.left + margin;
+    const int availableTop = monitorBounds.top + margin;
+    const int availableRight = std::max(availableLeft, monitorBounds.right - margin - width);
+    const int availableBottom = std::max(availableTop, monitorBounds.bottom - margin - height);
+    const int centeredX = visibleSelection.left + (visibleSelection.width() - width) / 2;
+    const int x = std::clamp(centeredX, availableLeft, availableRight);
+
+    const int below = visibleSelection.bottom + margin;
+    const int above = visibleSelection.top - height - margin;
+    int y{};
+    if (below <= availableBottom) y = below;
+    else if (above >= availableTop) y = above;
+    else y = std::clamp(visibleSelection.bottom - height - margin, availableTop, availableBottom);
+    return {x, y, x + width, y + height};
+}
+
 RECT ToWin32Rect(RectI value) noexcept { return RECT{value.left, value.top, value.right, value.bottom}; }
 RectI FromWin32Rect(const RECT& value) noexcept { return RectI{value.left, value.top, value.right, value.bottom}; }
 
@@ -39,4 +62,3 @@ bool CaptureFrameSet::containsHdr(const RectI& selection) const noexcept {
 }
 
 } // namespace hdrsnapshot
-

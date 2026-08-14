@@ -39,6 +39,7 @@ private:
     std::optional<Annotation> draft_;
     PointF textOrigin_{};
     HWND hoveredWindow_{};
+    HMONITOR uiMonitor_{};
     bool selectionLocked_{};
     int hoveredButton_{-1};
     int pressedButton_{-1};

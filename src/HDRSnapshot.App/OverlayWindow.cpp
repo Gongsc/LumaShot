@@ -38,6 +38,11 @@ bool PointIn(const RECT& rect, POINT point) { return PtInRect(&rect, point) != F
 
 COLORREF ToColor(ColorRgba color) { return RGB(color.r, color.g, color.b); }
 
+RectI MonitorBounds(HMONITOR monitor, RectI fallback) {
+    MONITORINFO info{sizeof(info)};
+    return monitor && GetMonitorInfoW(monitor, &info) ? FromWin32Rect(info.rcMonitor) : fallback;
+}
+
 void AlphaFill(HDC target, RECT rect, BYTE alpha) {
     if (rect.right <= rect.left || rect.bottom <= rect.top) return;
     HDC source = CreateCompatibleDC(target);
@@ -311,6 +316,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
                     auto frame = service.captureWindow(hoveredWindow_, includeCursor_);
                     ShowWindow(hwnd_, SW_SHOW); SetForegroundWindow(hwnd_);
                     selection_ = ClampRect(frame.desktopRect, frames_.virtualDesktop);
+                    RECT selectedRect = ToWin32Rect(selection_);
+                    uiMonitor_ = frame.monitor ? frame.monitor : MonitorFromRect(&selectedRect, MONITOR_DEFAULTTONEAREST);
                     frames_.monitors.push_back(std::move(frame));
                     preview_ = ColorPipeline::toneMapToSdr(ColorPipeline::compose(frames_, frames_.virtualDesktop));
                     selectionLocked_ = true;
@@ -341,6 +348,11 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             return 0;
         }
         if (dragKind_ == DragKind::Drawing) finishDrawing();
+        else {
+            POINT screen = PointFromLParam(lparam);
+            ClientToScreen(hwnd_, &screen);
+            uiMonitor_ = MonitorFromPoint(screen, MONITOR_DEFAULTTONEAREST);
+        }
         dragKind_ = DragKind::None; ReleaseCapture(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0;
     }
     case WM_CAPTURECHANGED:
@@ -366,10 +378,21 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
 void OverlayWindow::setMode(CaptureMode mode) {
     mode_ = mode; tool_ = AnnotationTool::None; selectionLocked_ = false; hoveredWindow_ = nullptr;
     POINT cursor{}; GetCursorPos(&cursor);
+    uiMonitor_ = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
     if (mode == CaptureMode::VirtualDesktop) { selection_ = frames_.virtualDesktop; selectionLocked_ = true; }
     else if (mode == CaptureMode::Monitor) {
-        const HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
-        for (const auto& frame : frames_.monitors) if (frame.monitor == monitor) { selection_ = frame.desktopRect; break; }
+        const MonitorFrame* selected = nullptr;
+        for (const auto& frame : frames_.monitors) {
+            if (frame.monitor == uiMonitor_) { selected = &frame; break; }
+        }
+        if (!selected) {
+            for (const auto& frame : frames_.monitors) {
+                if (ContainsPoint(frame.desktopRect, cursor.x, cursor.y)) { selected = &frame; break; }
+            }
+        }
+        if (!selected && !frames_.monitors.empty()) selected = &frames_.monitors.front();
+        selection_ = selected ? selected->desktopRect : frames_.virtualDesktop;
+        if (selected && selected->monitor) uiMonitor_ = selected->monitor;
         selectionLocked_ = true;
     } else selection_ = {};
     annotations_.clear(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
@@ -380,28 +403,27 @@ void OverlayWindow::rebuildButtons() {
     constexpr int buttonSize = 44, gap = 4;
     constexpr int modeCount = 4;
     constexpr int modeGroupWidth = buttonSize * modeCount + gap * (modeCount - 1);
-    const int x = (client.right - modeGroupWidth) / 2;
-    modeButtons_ = {{{x, 18, x + buttonSize, 18 + buttonSize}, ModeRegion, StringId::Region},
-                    {{x + buttonSize + gap, 18, x + buttonSize * 2 + gap, 18 + buttonSize}, ModeWindow, StringId::Window},
-                    {{x + (buttonSize + gap) * 2, 18, x + buttonSize * 3 + gap * 2, 18 + buttonSize}, ModeMonitor, StringId::Monitor},
-                    {{x + (buttonSize + gap) * 3, 18, x + buttonSize * 4 + gap * 3, 18 + buttonSize}, ModeAll, StringId::VirtualDesktop}};
+    const RectI monitorBounds = MonitorBounds(uiMonitor_, frames_.virtualDesktop);
+    POINT monitorTopLeft{monitorBounds.left, monitorBounds.top};
+    POINT monitorBottomRight{monitorBounds.right, monitorBounds.bottom};
+    ScreenToClient(hwnd_, &monitorTopLeft);
+    ScreenToClient(hwnd_, &monitorBottomRight);
+    const int modeX = std::clamp(monitorTopLeft.x + (monitorBottomRight.x - monitorTopLeft.x - modeGroupWidth) / 2,
+                                 monitorTopLeft.x + 8, std::max(monitorTopLeft.x + 8, monitorBottomRight.x - modeGroupWidth - 8));
+    const int modeY = monitorTopLeft.y + 18;
+    modeButtons_ = {{{modeX, modeY, modeX + buttonSize, modeY + buttonSize}, ModeRegion, StringId::Region},
+                    {{modeX + buttonSize + gap, modeY, modeX + buttonSize * 2 + gap, modeY + buttonSize}, ModeWindow, StringId::Window},
+                    {{modeX + (buttonSize + gap) * 2, modeY, modeX + buttonSize * 3 + gap * 2, modeY + buttonSize}, ModeMonitor, StringId::Monitor},
+                    {{modeX + (buttonSize + gap) * 3, modeY, modeX + buttonSize * 4 + gap * 3, modeY + buttonSize}, ModeAll, StringId::VirtualDesktop}};
     toolButtons_.clear();
     if (selection_.empty()) return;
     constexpr int count = 11;
     constexpr int toolbarWidth = buttonSize * count + gap * (count - 1);
-    POINT selectionTopLeft{selection_.left, selection_.top};
-    POINT selectionBottomRight{selection_.right, selection_.bottom};
-    ScreenToClient(hwnd_, &selectionTopLeft); ScreenToClient(hwnd_, &selectionBottomRight);
-    int toolbarX = selectionTopLeft.x + (selectionBottomRight.x - selectionTopLeft.x - toolbarWidth) / 2;
-    const int selectionTop = selectionTopLeft.y;
-    const int selectionBottom = selectionBottomRight.y;
-    const int below = selectionBottom + 8;
-    const int above = selectionTop - buttonSize - 8;
-    int toolbarY{};
-    toolbarX = std::clamp(toolbarX, 8, std::max(8, static_cast<int>(client.right) - toolbarWidth - 8));
-    if (below + buttonSize <= client.bottom - 8) toolbarY = below;
-    else if (above >= 8) toolbarY = above;
-    else toolbarY = std::clamp(selectionBottom - buttonSize - 12, 8, std::max(8, static_cast<int>(client.bottom) - buttonSize - 8));
+    const RectI toolbarScreen = PlaceToolbar(selection_, monitorBounds, toolbarWidth, buttonSize);
+    POINT toolbarOrigin{toolbarScreen.left, toolbarScreen.top};
+    ScreenToClient(hwnd_, &toolbarOrigin);
+    const int toolbarX = toolbarOrigin.x;
+    const int toolbarY = toolbarOrigin.y;
     const std::array defs{
         std::pair{ToolPen, StringId::Pen}, std::pair{ToolRectangle, StringId::Rectangle}, std::pair{ToolArrow, StringId::Arrow},
         std::pair{ToolText, StringId::Text}, std::pair{ToolUndo, StringId::Undo}, std::pair{ToolRedo, StringId::Redo},
@@ -460,6 +482,7 @@ void OverlayWindow::updateWindowHover(POINT clientPoint) {
     if (candidate == hoveredWindow_) return;
     hoveredWindow_ = candidate; selection_ = {};
     if (candidate) {
+        uiMonitor_ = MonitorFromPoint(screen, MONITOR_DEFAULTTONEAREST);
         RECT rect{};
         if (FAILED(DwmGetWindowAttribute(candidate, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(rect)))) GetWindowRect(candidate, &rect);
         selection_ = ClampRect(FromWin32Rect(rect), frames_.virtualDesktop);

@@ -31,6 +31,15 @@ void GeometryTests() {
     Check(intersection.left == 0 && intersection.top == 0 && intersection.width() == 100 && intersection.height() == 50, "intersects virtual desktop coordinates");
     const auto clamped = ClampRect({-20, -20, 200, 200}, {0, 0, 100, 100});
     Check(clamped.left == 0 && clamped.right == 100, "clamps selection to desktop");
+    const auto monitorToolbar = PlaceToolbar({0, 0, 3840, 2160}, {0, 0, 3840, 2160}, 524, 44);
+    Check(monitorToolbar.left == 1658 && monitorToolbar.top == 2108 && monitorToolbar.bottom == 2152,
+          "keeps current-display toolbar inside the physical monitor");
+    const auto mixedDesktopToolbar = PlaceToolbar({0, -840, 6000, 3000}, {0, 0, 3840, 2160}, 524, 44);
+    Check(mixedDesktopToolbar.left == 1658 && mixedDesktopToolbar.bottom <= 2160,
+          "does not place toolbar in a mixed-monitor virtual desktop gap");
+    const auto regionToolbar = PlaceToolbar({100, 100, 800, 600}, {0, 0, 1920, 1080}, 524, 44);
+    Check(regionToolbar.top == 608 && regionToolbar.left == 188,
+          "places a region toolbar below the selection when real monitor space exists");
 }
 
 void AnnotationTests() {
