@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals"><VCProjectVersion>17.0</VCProjectVersion><Keyword>Win32Proj</Keyword><ProjectGuid>{B8B4C874-8EA7-4AFE-855F-DF70F27D1D13}</ProjectGuid><RootNamespace>HDRSnapshotTests</RootNamespace><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration"><ConfigurationType>Application</ConfigurationType><UseDebugLibraries>true</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration"><ConfigurationType>Application</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><WholeProgramOptimization>true</WholeProgramOptimization><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup><OutDir>$(MSBuildThisFileDirectory)..\..\bin\$(Configuration)\</OutDir><IntDir>$(MSBuildThisFileDirectory)..\..\obj\HDRSnapshot.Tests\$(Configuration)\</IntDir></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><LanguageStandard>stdcpp20</LanguageStandard><ConformanceMode>true</ConformanceMode><AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\..\src\HDRSnapshot.Core\include;$(MSBuildThisFileDirectory)..\..\src\HDRSnapshot.App;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/utf-8 /permissive- %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+    <Link><SubSystem>Console</SubSystem><AdditionalDependencies>d3d11.lib;dxgi.lib;dxguid.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;ole32.lib;runtimeobject.lib;shell32.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="Tests.cpp" /><ClCompile Include="..\..\src\HDRSnapshot.App\CaptureService.cpp"><Link>CaptureService.cpp</Link></ClCompile><ClCompile Include="..\..\src\HDRSnapshot.App\ColorPipeline.cpp"><Link>ColorPipeline.cpp</Link></ClCompile><ClCompile Include="..\..\src\HDRSnapshot.App\AnnotationRenderer.cpp"><Link>AnnotationRenderer.cpp</Link></ClCompile><ClCompile Include="..\..\src\HDRSnapshot.App\ImageExporter.cpp"><Link>ImageExporter.cpp</Link></ClCompile><ClCompile Include="..\..\src\HDRSnapshot.App\ClipboardService.cpp"><Link>ClipboardService.cpp</Link></ClCompile></ItemGroup>
+  <ItemGroup><ProjectReference Include="..\..\src\HDRSnapshot.Core\HDRSnapshot.Core.vcxproj"><Project>{2894E9E1-A623-4588-9D7A-88124723FEF2}</Project></ProjectReference></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

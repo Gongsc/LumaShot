@@ -1,0 +1,12 @@
+.vs/
+bin/
+obj/
+artifacts/
+x64/
+src/HDRSnapshot.App/assets/HDRSnapshot.ico
+*.user
+*.aps
+*.VC.db
+*.VC.opendb
+*.suo
+*.log
