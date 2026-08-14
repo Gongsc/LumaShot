@@ -40,6 +40,16 @@ void GeometryTests() {
     const auto regionToolbar = PlaceToolbar({100, 100, 800, 600}, {0, 0, 1920, 1080}, 524, 44);
     Check(regionToolbar.top == 608 && regionToolbar.left == 188,
           "places a region toolbar below the selection when real monitor space exists");
+    const RectI desktop{-2160, -1145, 3840, 2695};
+    const RectI overlayClient{0, 0, 4800, 3072};
+    const POINT desktopPoint = MapPointBetweenRects({2400, 1536}, overlayClient, desktop);
+    const POINT clientPoint = MapPointBetweenRects(desktopPoint, desktop, overlayClient);
+    Check(desktopPoint.x == 840 && desktopPoint.y == 775 && clientPoint.x == 2400 && clientPoint.y == 1536,
+          "maps overlay coordinates to physical mixed-DPI desktop coordinates without DPI virtualization");
+    const RectI mappedSelection = MapRectBetweenRects({-1080, -572, 1920, 1348}, desktop, overlayClient);
+    Check(mappedSelection.left == 864 && mappedSelection.top == 458 &&
+          mappedSelection.right == 3264 && mappedSelection.bottom == 1994,
+          "maps both region-selection edges through the same physical-pixel transform");
 }
 
 void AnnotationTests() {

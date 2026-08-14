@@ -51,6 +51,24 @@ RectI PlaceToolbar(RectI selection, RectI monitorBounds, int width, int height, 
     return {x, y, x + width, y + height};
 }
 
+POINT MapPointBetweenRects(POINT point, RectI sourceBounds, RectI targetBounds) noexcept {
+    const int sourceWidth = sourceBounds.width();
+    const int sourceHeight = sourceBounds.height();
+    if (sourceWidth <= 0 || sourceHeight <= 0) return POINT{targetBounds.left, targetBounds.top};
+    const auto map = [](int value, int sourceStart, int sourceSpan, int targetStart, int targetSpan) {
+        return targetStart + static_cast<int>(static_cast<std::int64_t>(value - sourceStart) * targetSpan / sourceSpan);
+    };
+    return {map(point.x, sourceBounds.left, sourceWidth, targetBounds.left, targetBounds.width()),
+            map(point.y, sourceBounds.top, sourceHeight, targetBounds.top, targetBounds.height())};
+}
+
+RectI MapRectBetweenRects(RectI value, RectI sourceBounds, RectI targetBounds) noexcept {
+    value = NormalizeRect(value);
+    const POINT topLeft = MapPointBetweenRects({value.left, value.top}, sourceBounds, targetBounds);
+    const POINT bottomRight = MapPointBetweenRects({value.right, value.bottom}, sourceBounds, targetBounds);
+    return {topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+}
+
 RECT ToWin32Rect(RectI value) noexcept { return RECT{value.left, value.top, value.right, value.bottom}; }
 RectI FromWin32Rect(const RECT& value) noexcept { return RectI{value.left, value.top, value.right, value.bottom}; }
 

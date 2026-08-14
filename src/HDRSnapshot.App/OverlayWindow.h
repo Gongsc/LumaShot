@@ -25,6 +25,9 @@ private:
     HWND textEditor_{};
     CaptureFrameSet frames_;
     ImageBgra8 preview_;
+    ImageBgra8 dimmedPreview_;
+    ImageBgra8 maskedPreview_;
+    RectI maskedSelectionPixels_{};
     CaptureMode mode_;
     Language language_;
     bool includeCursor_{};
@@ -48,11 +51,19 @@ private:
     CommitHandler commit_;
     std::vector<Button> modeButtons_;
     std::vector<Button> toolButtons_;
+    HDC backBufferDc_{};
+    HBITMAP backBufferBitmap_{};
+    HGDIOBJ backBufferPrevious_{};
+    int backBufferWidth_{};
+    int backBufferHeight_{};
 
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     static LRESULT CALLBACK EditProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR data);
     LRESULT handleMessage(UINT message, WPARAM wparam, LPARAM lparam);
     void paint();
+    [[nodiscard]] bool ensureBackBuffer(HDC reference, int width, int height);
+    void releaseBackBuffer() noexcept;
+    void updateMaskedPreview();
     void rebuildButtons();
     [[nodiscard]] int buttonAt(POINT clientPoint) const noexcept;
     void activateButton(int id);
@@ -61,6 +72,8 @@ private:
     [[nodiscard]] HWND windowAt(POINT screenPoint) const;
     [[nodiscard]] DragKind hitSelection(POINT screenPoint) const noexcept;
     [[nodiscard]] PointF relativePoint(POINT screenPoint) const noexcept;
+    [[nodiscard]] POINT desktopFromClient(POINT clientPoint) const noexcept;
+    [[nodiscard]] POINT clientFromDesktop(POINT desktopPoint) const noexcept;
     void beginDrawing(POINT screenPoint);
     void updateDrawing(POINT screenPoint);
     void finishDrawing();

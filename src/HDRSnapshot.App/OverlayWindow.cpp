@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <windowsx.h>
 
 namespace hdrsnapshot {
@@ -38,6 +39,17 @@ bool PointIn(const RECT& rect, POINT point) { return PtInRect(&rect, point) != F
 
 COLORREF ToColor(ColorRgba color) { return RGB(color.r, color.g, color.b); }
 
+ImageBgra8 DimPreview(const ImageBgra8& source, BYTE opacity) {
+    ImageBgra8 result = source;
+    const unsigned int retained = 255u - opacity;
+    for (std::size_t offset = 0; offset + 3 < result.pixels.size(); offset += 4) {
+        result.pixels[offset] = static_cast<std::uint8_t>((result.pixels[offset] * retained + 127u) / 255u);
+        result.pixels[offset + 1] = static_cast<std::uint8_t>((result.pixels[offset + 1] * retained + 127u) / 255u);
+        result.pixels[offset + 2] = static_cast<std::uint8_t>((result.pixels[offset + 2] * retained + 127u) / 255u);
+    }
+    return result;
+}
+
 RectI MonitorBounds(HMONITOR monitor, RectI fallback) {
     MONITORINFO info{sizeof(info)};
     return monitor && GetMonitorInfoW(monitor, &info) ? FromWin32Rect(info.rcMonitor) : fallback;
@@ -54,6 +66,56 @@ void AlphaFill(HDC target, RECT rect, BYTE alpha) {
     SelectObject(source, old);
     DeleteObject(bitmap);
     DeleteDC(source);
+}
+
+void DimOutsideSelection(HDC dc, const RECT& client, const RECT& selected, BYTE opacity, bool edgeShadow) {
+    RECT visible{};
+    if (!IntersectRect(&visible, &selected, &client)) {
+        if (opacity > 0) AlphaFill(dc, client, opacity);
+        return;
+    }
+    if (opacity > 0) {
+        AlphaFill(dc, {client.left, client.top, client.right, visible.top}, opacity);
+        AlphaFill(dc, {client.left, visible.bottom, client.right, client.bottom}, opacity);
+        AlphaFill(dc, {client.left, visible.top, visible.left, visible.bottom}, opacity);
+        AlphaFill(dc, {visible.right, visible.top, client.right, visible.bottom}, opacity);
+    }
+    if (!edgeShadow) return;
+
+    constexpr std::array<std::pair<int, BYTE>, 3> shadowLayers{{
+        {12, static_cast<BYTE>(18)}, {8, static_cast<BYTE>(22)}, {4, static_cast<BYTE>(28)}}};
+    for (const auto [depth, alpha] : shadowLayers) {
+        RECT band{};
+        RECT candidate{visible.left - depth, visible.top - depth, visible.right + depth, visible.top};
+        if (IntersectRect(&band, &candidate, &client)) AlphaFill(dc, band, alpha);
+        candidate = {visible.left - depth, visible.bottom, visible.right + depth, visible.bottom + depth};
+        if (IntersectRect(&band, &candidate, &client)) AlphaFill(dc, band, alpha);
+        candidate = {visible.left - depth, visible.top, visible.left, visible.bottom};
+        if (IntersectRect(&band, &candidate, &client)) AlphaFill(dc, band, alpha);
+        candidate = {visible.right, visible.top, visible.right + depth, visible.bottom};
+        if (IntersectRect(&band, &candidate, &client)) AlphaFill(dc, band, alpha);
+    }
+}
+
+void DrawSelectionHandles(HDC dc, const RECT& selected) {
+    constexpr int radius = 4;
+    const int centerX = (selected.left + selected.right) / 2;
+    const int centerY = (selected.top + selected.bottom) / 2;
+    const std::array<POINT, 8> handles{{
+        {selected.left, selected.top}, {centerX, selected.top}, {selected.right, selected.top},
+        {selected.left, centerY}, {selected.right, centerY},
+        {selected.left, selected.bottom}, {centerX, selected.bottom}, {selected.right, selected.bottom}}};
+    HBRUSH fill = CreateSolidBrush(RGB(255, 255, 255));
+    HPEN outline = CreatePen(PS_SOLID, 1, RGB(0, 120, 212));
+    const auto oldBrush = SelectObject(dc, fill);
+    const auto oldPen = SelectObject(dc, outline);
+    for (const auto point : handles) {
+        RoundRect(dc, point.x - radius, point.y - radius, point.x + radius + 1, point.y + radius + 1, 3, 3);
+    }
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+    DeleteObject(outline);
+    DeleteObject(fill);
 }
 
 void DrawArrowGdi(HDC dc, PointF start, PointF end, HPEN pen) {
@@ -220,6 +282,8 @@ void FillRoundRect(HDC dc, const RECT& rect, int radius, COLORREF fill, COLORREF
 OverlayWindow::OverlayWindow(HINSTANCE instance, CaptureFrameSet frames, CaptureMode mode, Language language, bool includeCursor)
     : instance_(instance), frames_(std::move(frames)), mode_(mode), language_(language), includeCursor_(includeCursor) {
     preview_ = ColorPipeline::toneMapToSdr(ColorPipeline::compose(frames_, frames_.virtualDesktop));
+    dimmedPreview_ = DimPreview(preview_, 140);
+    maskedPreview_ = dimmedPreview_;
 }
 
 bool OverlayWindow::run(const CommitHandler& commit) {
@@ -280,7 +344,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         }
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd_, 0}; TrackMouseEvent(&tracking);
         if (pressedButton_ >= 0) return 0;
-        POINT screen = client; ClientToScreen(hwnd_, &screen);
+        POINT screen = desktopFromClient(client);
         if ((wparam & MK_LBUTTON) != 0) {
             if (dragKind_ == DragKind::Drawing) updateDrawing(screen);
             else if (dragKind_ != DragKind::None) {
@@ -307,7 +371,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         if (const int button = buttonAt(client); button >= 0) {
             pressedButton_ = button; SetCapture(hwnd_); InvalidateRect(hwnd_, nullptr, FALSE); UpdateWindow(hwnd_); return 0;
         }
-        POINT screen = client; ClientToScreen(hwnd_, &screen);
+        POINT screen = desktopFromClient(client);
         if (mode_ == CaptureMode::Window && !selectionLocked_) {
             if (hoveredWindow_ && !selection_.empty()) {
                 try {
@@ -320,6 +384,9 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
                     uiMonitor_ = frame.monitor ? frame.monitor : MonitorFromRect(&selectedRect, MONITOR_DEFAULTTONEAREST);
                     frames_.monitors.push_back(std::move(frame));
                     preview_ = ColorPipeline::toneMapToSdr(ColorPipeline::compose(frames_, frames_.virtualDesktop));
+                    dimmedPreview_ = DimPreview(preview_, 140);
+                    maskedPreview_ = dimmedPreview_;
+                    maskedSelectionPixels_ = {};
                     selectionLocked_ = true;
                 } catch (...) {
                     ShowWindow(hwnd_, SW_SHOW); SetForegroundWindow(hwnd_);
@@ -349,8 +416,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         }
         if (dragKind_ == DragKind::Drawing) finishDrawing();
         else {
-            POINT screen = PointFromLParam(lparam);
-            ClientToScreen(hwnd_, &screen);
+            POINT screen = desktopFromClient(PointFromLParam(lparam));
             uiMonitor_ = MonitorFromPoint(screen, MONITOR_DEFAULTTONEAREST);
         }
         dragKind_ = DragKind::None; ReleaseCapture(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0;
@@ -370,7 +436,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     case CommitTextMessage: commitText(wparam != 0); return 0;
     case WM_DISPLAYCHANGE: finished_ = true; DestroyWindow(hwnd_); return 0;
     case WM_CLOSE: finished_ = true; DestroyWindow(hwnd_); return 0;
-    case WM_DESTROY: hwnd_ = nullptr; return 0;
+    case WM_DESTROY: releaseBackBuffer(); hwnd_ = nullptr; return 0;
     default: return DefWindowProcW(hwnd_, message, wparam, lparam);
     }
 }
@@ -404,10 +470,8 @@ void OverlayWindow::rebuildButtons() {
     constexpr int modeCount = 4;
     constexpr int modeGroupWidth = buttonSize * modeCount + gap * (modeCount - 1);
     const RectI monitorBounds = MonitorBounds(uiMonitor_, frames_.virtualDesktop);
-    POINT monitorTopLeft{monitorBounds.left, monitorBounds.top};
-    POINT monitorBottomRight{monitorBounds.right, monitorBounds.bottom};
-    ScreenToClient(hwnd_, &monitorTopLeft);
-    ScreenToClient(hwnd_, &monitorBottomRight);
+    POINT monitorTopLeft = clientFromDesktop({monitorBounds.left, monitorBounds.top});
+    POINT monitorBottomRight = clientFromDesktop({monitorBounds.right, monitorBounds.bottom});
     const int modeX = std::clamp(monitorTopLeft.x + (monitorBottomRight.x - monitorTopLeft.x - modeGroupWidth) / 2,
                                  monitorTopLeft.x + 8, std::max(monitorTopLeft.x + 8, monitorBottomRight.x - modeGroupWidth - 8));
     const int modeY = monitorTopLeft.y + 18;
@@ -420,8 +484,7 @@ void OverlayWindow::rebuildButtons() {
     constexpr int count = 11;
     constexpr int toolbarWidth = buttonSize * count + gap * (count - 1);
     const RectI toolbarScreen = PlaceToolbar(selection_, monitorBounds, toolbarWidth, buttonSize);
-    POINT toolbarOrigin{toolbarScreen.left, toolbarScreen.top};
-    ScreenToClient(hwnd_, &toolbarOrigin);
+    POINT toolbarOrigin = clientFromDesktop({toolbarScreen.left, toolbarScreen.top});
     const int toolbarX = toolbarOrigin.x;
     const int toolbarY = toolbarOrigin.y;
     const std::array defs{
@@ -477,7 +540,7 @@ HWND OverlayWindow::windowAt(POINT point) const {
 }
 
 void OverlayWindow::updateWindowHover(POINT clientPoint) {
-    POINT screen = clientPoint; ClientToScreen(hwnd_, &screen);
+    POINT screen = desktopFromClient(clientPoint);
     const HWND candidate = windowAt(screen);
     if (candidate == hoveredWindow_) return;
     hoveredWindow_ = candidate; selection_ = {};
@@ -503,6 +566,18 @@ OverlayWindow::DragKind OverlayWindow::hitSelection(POINT point) const noexcept 
 
 PointF OverlayWindow::relativePoint(POINT point) const noexcept {
     return {static_cast<float>(point.x - selection_.left), static_cast<float>(point.y - selection_.top)};
+}
+
+POINT OverlayWindow::desktopFromClient(POINT point) const noexcept {
+    RECT client{};
+    GetClientRect(hwnd_, &client);
+    return MapPointBetweenRects(point, FromWin32Rect(client), frames_.virtualDesktop);
+}
+
+POINT OverlayWindow::clientFromDesktop(POINT point) const noexcept {
+    RECT client{};
+    GetClientRect(hwnd_, &client);
+    return MapPointBetweenRects(point, frames_.virtualDesktop, FromWin32Rect(client));
 }
 
 void OverlayWindow::beginDrawing(POINT point) {
@@ -531,7 +606,7 @@ void OverlayWindow::finishDrawing() {
 void OverlayWindow::beginText(POINT point) {
     if (textEditor_) return;
     textOrigin_ = relativePoint(point);
-    POINT client = point; ScreenToClient(hwnd_, &client);
+    POINT client = clientFromDesktop(point);
     textEditor_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                                   client.x, client.y, 280, 34, hwnd_, nullptr, instance_, nullptr);
     if (textEditor_) {
@@ -559,25 +634,86 @@ bool OverlayWindow::perform(OverlayAction action) {
     succeeded_ = true; finished_ = true; DestroyWindow(hwnd_); return true;
 }
 
+bool OverlayWindow::ensureBackBuffer(HDC reference, int width, int height) {
+    if (backBufferDc_ && backBufferBitmap_ && backBufferWidth_ == width && backBufferHeight_ == height) return true;
+    releaseBackBuffer();
+    if (width <= 0 || height <= 0) return false;
+    backBufferDc_ = CreateCompatibleDC(reference);
+    if (!backBufferDc_) return false;
+    backBufferBitmap_ = CreateCompatibleBitmap(reference, width, height);
+    if (!backBufferBitmap_) {
+        releaseBackBuffer();
+        return false;
+    }
+    backBufferPrevious_ = SelectObject(backBufferDc_, backBufferBitmap_);
+    if (!backBufferPrevious_ || backBufferPrevious_ == HGDI_ERROR) {
+        backBufferPrevious_ = nullptr;
+        releaseBackBuffer();
+        return false;
+    }
+    backBufferWidth_ = width;
+    backBufferHeight_ = height;
+    return true;
+}
+
+void OverlayWindow::releaseBackBuffer() noexcept {
+    if (backBufferDc_ && backBufferPrevious_) SelectObject(backBufferDc_, backBufferPrevious_);
+    if (backBufferBitmap_) DeleteObject(backBufferBitmap_);
+    if (backBufferDc_) DeleteDC(backBufferDc_);
+    backBufferDc_ = nullptr;
+    backBufferBitmap_ = nullptr;
+    backBufferPrevious_ = nullptr;
+    backBufferWidth_ = 0;
+    backBufferHeight_ = 0;
+}
+
+void OverlayWindow::updateMaskedPreview() {
+    if (maskedPreview_.width != dimmedPreview_.width || maskedPreview_.height != dimmedPreview_.height ||
+        maskedPreview_.pixels.size() != dimmedPreview_.pixels.size()) {
+        maskedPreview_ = dimmedPreview_;
+        maskedSelectionPixels_ = {};
+    }
+    const auto copyRows = [&](const ImageBgra8& source, RectI area) {
+        if (area.empty()) return;
+        const std::size_t rowBytes = static_cast<std::size_t>(area.width()) * 4;
+        for (int y = area.top; y < area.bottom; ++y) {
+            const std::size_t offset = (static_cast<std::size_t>(y) * preview_.width + area.left) * 4;
+            memcpy(maskedPreview_.pixels.data() + offset, source.pixels.data() + offset, rowBytes);
+        }
+    };
+    copyRows(dimmedPreview_, maskedSelectionPixels_);
+    maskedSelectionPixels_ = {};
+    if (selection_.empty() || preview_.width == 0 || preview_.height == 0) return;
+    const RectI previewBounds{0, 0, static_cast<int>(preview_.width), static_cast<int>(preview_.height)};
+    const RectI selectedPixels = ClampRect(
+        MapRectBetweenRects(selection_, frames_.virtualDesktop, previewBounds), previewBounds);
+    if (selectedPixels.empty()) return;
+    copyRows(preview_, selectedPixels);
+    maskedSelectionPixels_ = selectedPixels;
+}
+
 void OverlayWindow::paint() {
-    PAINTSTRUCT ps{}; HDC dc = BeginPaint(hwnd_, &ps);
+    PAINTSTRUCT ps{}; HDC windowDc = BeginPaint(hwnd_, &ps);
     RECT client{}; GetClientRect(hwnd_, &client);
+    const bool buffered = ensureBackBuffer(windowDc, client.right - client.left, client.bottom - client.top);
+    HDC dc = buffered ? backBufferDc_ : windowDc;
     BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER); info.bmiHeader.biWidth = static_cast<LONG>(preview_.width);
     info.bmiHeader.biHeight = -static_cast<LONG>(preview_.height); info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
-    StretchDIBits(dc, 0, 0, client.right, client.bottom, 0, 0, preview_.width, preview_.height, preview_.pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
+    const bool regionMode = mode_ == CaptureMode::Region;
+    if (regionMode) updateMaskedPreview();
+    const ImageBgra8& background = regionMode ? maskedPreview_ : preview_;
+    StretchDIBits(dc, 0, 0, client.right, client.bottom, 0, 0, background.width, background.height,
+                  background.pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
     int x{}, y{};
     if (!selection_.empty()) {
-        POINT topLeft{selection_.left, selection_.top};
-        POINT bottomRight{selection_.right, selection_.bottom};
-        ScreenToClient(hwnd_, &topLeft); ScreenToClient(hwnd_, &bottomRight);
+        POINT topLeft = clientFromDesktop({selection_.left, selection_.top});
+        POINT bottomRight = clientFromDesktop({selection_.right, selection_.bottom});
         RECT selected{topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
-        RECT visible{};
-        if (IntersectRect(&visible, &selected, &client)) {
-            AlphaFill(dc, {client.left, client.top, client.right, visible.top}, 105);
-            AlphaFill(dc, {client.left, visible.bottom, client.right, client.bottom}, 105);
-            AlphaFill(dc, {client.left, visible.top, visible.left, visible.bottom}, 105);
-            AlphaFill(dc, {visible.right, visible.top, client.right, visible.bottom}, 105);
-        } else AlphaFill(dc, client, 105);
+        if (regionMode) {
+            DimOutsideSelection(dc, client, selected, 0, true);
+        } else {
+            DimOutsideSelection(dc, client, selected, 105, false);
+        }
         x = topLeft.x; y = topLeft.y;
         HPEN border = CreatePen(PS_SOLID, 2, RGB(52, 152, 255)); const auto oldPen = SelectObject(dc, border); const auto oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
         Rectangle(dc, x, y, bottomRight.x, bottomRight.y); SelectObject(dc, oldBrush); SelectObject(dc, oldPen); DeleteObject(border);
@@ -601,7 +737,8 @@ void OverlayWindow::paint() {
         };
         for (const auto& annotation : annotations_.items()) drawOne(annotation);
         if (draft_) drawOne(*draft_);
-    } else AlphaFill(dc, client, 105);
+        if (regionMode) DrawSelectionHandles(dc, selected);
+    } else if (!regionMode) AlphaFill(dc, client, 105);
     rebuildButtons();
     SetBkMode(dc, TRANSPARENT);
     HFONT font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
@@ -677,6 +814,7 @@ void OverlayWindow::paint() {
 
     SelectObject(dc, oldFont);
     DeleteObject(font);
+    if (buffered) BitBlt(windowDc, 0, 0, client.right - client.left, client.bottom - client.top, dc, 0, 0, SRCCOPY);
     EndPaint(hwnd_, &ps);
 }
 
