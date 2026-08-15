@@ -18,6 +18,7 @@ Repeat the following on single-SDR, single-HDR, and mixed HDR/SDR desktops, incl
 - Exercise region, window, current-display, and all-display modes; include a cross-display region and a display with a negative virtual origin.
 - Move and resize the selection using every edge and corner. Confirm output dimensions exactly match the selected physical pixels.
 - Draw pen, rectangle, arrow, and Chinese/English IME text annotations; cycle color and width; test undo and redo.
+- On an HDR selection, open HDR calibration from the capture toolbar, drag both sliders, reset them, and confirm that the overlay, PNG, and clipboard output match. Confirm that the control is disabled for an SDR-only selection.
 - Confirm the overlay and toolbar never appear in output, with and without cursor capture.
 - Save PNG and verify normal SDR appearance. Save JXR from an HDR display and verify highlights in Windows Photos; decode it and confirm a channel value above `1.0` where the source contains HDR highlights.
 - Paste into Paint, Office, and representative chat applications. Confirm PNG, `CF_DIBV5`, and `CF_DIB` consumers receive the SDR image.

@@ -8,7 +8,8 @@
 namespace lumashot {
 
 enum class OverlayAction { Copy, Save };
-using CommitHandler = std::function<bool(HWND, OverlayAction, const CaptureFrameSet&, RectI, const AnnotationDocument&)>;
+using CommitHandler = std::function<bool(HWND, OverlayAction, const CaptureFrameSet&, RectI,
+                                         const AnnotationDocument&, HdrCalibration)>;
 
 class OverlayWindow {
 public:
@@ -16,6 +17,7 @@ public:
                   bool includeCursor, HdrCalibration calibration);
     bool run(const CommitHandler& commit);
     [[nodiscard]] CaptureMode mode() const noexcept { return mode_; }
+    [[nodiscard]] HdrCalibration calibration() const noexcept { return calibration_; }
 
 private:
     enum class DragKind { None, NewSelection, Move, Left, Top, Right, Bottom, TopLeft, TopRight, BottomLeft, BottomRight, Drawing };
@@ -25,6 +27,7 @@ private:
     HWND hwnd_{};
     HWND textEditor_{};
     CaptureFrameSet frames_;
+    ImageF16 previewSource_;
     ImageBgra8 preview_;
     ImageBgra8 dimmedPreview_;
     ImageBgra8 maskedPreview_;
@@ -53,6 +56,11 @@ private:
     CommitHandler commit_;
     std::vector<Button> modeButtons_;
     std::vector<Button> toolButtons_;
+    bool calibrationPanelOpen_{};
+    RECT calibrationPanelRect_{};
+    RECT outputBrightnessSliderRect_{};
+    RECT highlightCompressionSliderRect_{};
+    RECT resetCalibrationRect_{};
     HDC backBufferDc_{};
     HBITMAP backBufferBitmap_{};
     HGDIOBJ backBufferPrevious_{};
@@ -65,6 +73,9 @@ private:
     void paint();
     [[nodiscard]] bool ensureBackBuffer(HDC reference, int width, int height);
     void releaseBackBuffer() noexcept;
+    void updateCalibrationPreview();
+    void setCalibrationFromPoint(int id, int x);
+    [[nodiscard]] int calibrationValue(int id) const noexcept;
     void updateMaskedPreview();
     void rebuildButtons();
     [[nodiscard]] int buttonAt(POINT clientPoint) const noexcept;

@@ -26,9 +26,14 @@ constexpr int ToolUndo = 204;
 constexpr int ToolRedo = 205;
 constexpr int ToolColor = 206;
 constexpr int ToolWidth = 207;
-constexpr int ActionCopy = 208;
-constexpr int ActionSave = 209;
-constexpr int ActionCancel = 210;
+constexpr int ActionHdrCalibration = 208;
+constexpr int ActionCopy = 209;
+constexpr int ActionSave = 210;
+constexpr int ActionCancel = 211;
+constexpr int CalibrationOutputBrightness = 300;
+constexpr int CalibrationHighlightCompression = 301;
+constexpr int CalibrationReset = 302;
+constexpr int CalibrationPanelSurface = 303;
 constexpr std::array<ColorRgba, 6> AnnotationColors{{
     {255, 55, 55, 255}, {255, 213, 55, 255}, {60, 205, 95, 255},
     {50, 205, 230, 255}, {65, 125, 255, 255}, {255, 255, 255, 255}}};
@@ -241,6 +246,13 @@ void DrawButtonIcon(HDC dc, int id, const RECT& bounds, COLORREF color,
         line(left + 2, bottom - 4, right - 2, bottom - 4);
         break;
     }
+    case ActionHdrCalibration:
+        Ellipse(dc, cx - 5, cy - 5, cx + 6, cy + 6);
+        line(cx, top, cx, top + 4); line(cx, bottom - 4, cx, bottom);
+        line(left, cy, left + 4, cy); line(right - 4, cy, right, cy);
+        line(left + 3, top + 3, left + 6, top + 6); line(right - 6, bottom - 6, right - 3, bottom - 3);
+        line(right - 6, top + 6, right - 3, top + 3); line(left + 3, bottom - 3, left + 6, bottom - 6);
+        break;
     case ActionCopy:
         RoundRect(dc, left + 5, top + 1, right, bottom - 4, 3, 3);
         RoundRect(dc, left, top + 6, right - 5, bottom + 1, 3, 3);
@@ -283,9 +295,8 @@ OverlayWindow::OverlayWindow(HINSTANCE instance, CaptureFrameSet frames, Capture
                              bool includeCursor, HdrCalibration calibration)
     : instance_(instance), frames_(std::move(frames)), mode_(mode), language_(language),
       includeCursor_(includeCursor), calibration_(calibration) {
-    preview_ = ColorPipeline::toneMapToSdr(ColorPipeline::compose(frames_, frames_.virtualDesktop), calibration_);
-    dimmedPreview_ = DimPreview(preview_, 140);
-    maskedPreview_ = dimmedPreview_;
+    previewSource_ = ColorPipeline::compose(frames_, frames_.virtualDesktop);
+    updateCalibrationPreview();
 }
 
 bool OverlayWindow::run(const CommitHandler& commit) {
@@ -345,6 +356,10 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd_, 0}; TrackMouseEvent(&tracking);
+        if (pressedButton_ == CalibrationOutputBrightness || pressedButton_ == CalibrationHighlightCompression) {
+            if ((wparam & MK_LBUTTON) != 0) setCalibrationFromPoint(pressedButton_, client.x);
+            return 0;
+        }
         if (pressedButton_ >= 0) return 0;
         POINT screen = desktopFromClient(client);
         if ((wparam & MK_LBUTTON) != 0) {
@@ -371,7 +386,11 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         SetFocus(hwnd_);
         POINT client = PointFromLParam(lparam);
         if (const int button = buttonAt(client); button >= 0) {
-            pressedButton_ = button; SetCapture(hwnd_); InvalidateRect(hwnd_, nullptr, FALSE); UpdateWindow(hwnd_); return 0;
+            pressedButton_ = button;
+            SetCapture(hwnd_);
+            if (button == CalibrationOutputBrightness || button == CalibrationHighlightCompression)
+                setCalibrationFromPoint(button, client.x);
+            InvalidateRect(hwnd_, nullptr, FALSE); UpdateWindow(hwnd_); return 0;
         }
         POINT screen = desktopFromClient(client);
         if (mode_ == CaptureMode::Window && !selectionLocked_) {
@@ -385,10 +404,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
                     RECT selectedRect = ToWin32Rect(selection_);
                     uiMonitor_ = frame.monitor ? frame.monitor : MonitorFromRect(&selectedRect, MONITOR_DEFAULTTONEAREST);
                     frames_.monitors.push_back(std::move(frame));
-                    preview_ = ColorPipeline::toneMapToSdr(ColorPipeline::compose(frames_, frames_.virtualDesktop), calibration_);
-                    dimmedPreview_ = DimPreview(preview_, 140);
-                    maskedPreview_ = dimmedPreview_;
-                    maskedSelectionPixels_ = {};
+                    previewSource_ = ColorPipeline::compose(frames_, frames_.virtualDesktop);
+                    updateCalibrationPreview();
                     selectionLocked_ = true;
                 } catch (...) {
                     ShowWindow(hwnd_, SW_SHOW); SetForegroundWindow(hwnd_);
@@ -411,9 +428,12 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_LBUTTONUP: {
         if (pressedButton_ >= 0) {
             const int pressed = pressedButton_;
+            if (pressed == CalibrationOutputBrightness || pressed == CalibrationHighlightCompression)
+                setCalibrationFromPoint(pressed, PointFromLParam(lparam).x);
             const bool activate = buttonAt(PointFromLParam(lparam)) == pressed;
             pressedButton_ = -1; ReleaseCapture(); InvalidateRect(hwnd_, nullptr, FALSE);
-            if (activate) activateButton(pressed);
+            if (activate && pressed != CalibrationOutputBrightness && pressed != CalibrationHighlightCompression)
+                activateButton(pressed);
             return 0;
         }
         if (dragKind_ == DragKind::Drawing) finishDrawing();
@@ -428,6 +448,9 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         return 0;
     case WM_KEYDOWN: {
         const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (wparam == VK_ESCAPE && calibrationPanelOpen_) {
+            calibrationPanelOpen_ = false; rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+        }
         if (wparam == VK_ESCAPE) { finished_ = true; DestroyWindow(hwnd_); return 0; }
         if (control && wparam == 'C') { perform(OverlayAction::Copy); return 0; }
         if (control && wparam == 'S') { perform(OverlayAction::Save); return 0; }
@@ -482,8 +505,14 @@ void OverlayWindow::rebuildButtons() {
                     {{modeX + (buttonSize + gap) * 2, modeY, modeX + buttonSize * 3 + gap * 2, modeY + buttonSize}, ModeMonitor, StringId::Monitor},
                     {{modeX + (buttonSize + gap) * 3, modeY, modeX + buttonSize * 4 + gap * 3, modeY + buttonSize}, ModeAll, StringId::VirtualDesktop}};
     toolButtons_.clear();
-    if (selection_.empty()) return;
-    constexpr int count = 11;
+    calibrationPanelRect_ = {};
+    outputBrightnessSliderRect_ = {};
+    highlightCompressionSliderRect_ = {};
+    resetCalibrationRect_ = {};
+    if (selection_.empty()) { calibrationPanelOpen_ = false; return; }
+    const bool hdrSelection = frames_.containsHdr(selection_);
+    if (!hdrSelection) calibrationPanelOpen_ = false;
+    constexpr int count = 12;
     constexpr int toolbarWidth = buttonSize * count + gap * (count - 1);
     const RectI toolbarScreen = PlaceToolbar(selection_, monitorBounds, toolbarWidth, buttonSize);
     POINT toolbarOrigin = clientFromDesktop({toolbarScreen.left, toolbarScreen.top});
@@ -493,14 +522,38 @@ void OverlayWindow::rebuildButtons() {
         std::pair{ToolPen, StringId::Pen}, std::pair{ToolRectangle, StringId::Rectangle}, std::pair{ToolArrow, StringId::Arrow},
         std::pair{ToolText, StringId::Text}, std::pair{ToolUndo, StringId::Undo}, std::pair{ToolRedo, StringId::Redo},
         std::pair{ToolColor, StringId::Color}, std::pair{ToolWidth, StringId::LineWidth},
+        std::pair{ActionHdrCalibration, StringId::HdrCalibrationTitle},
         std::pair{ActionCopy, StringId::Copy}, std::pair{ActionSave, StringId::Save}, std::pair{ActionCancel, StringId::Cancel}};
     for (int i = 0; i < count; ++i) {
         const int buttonX = toolbarX + i * (buttonSize + gap);
         toolButtons_.push_back({{buttonX, toolbarY, buttonX + buttonSize, toolbarY + buttonSize}, defs[i].first, defs[i].second});
     }
+    if (!calibrationPanelOpen_) return;
+
+    constexpr int panelWidth = 380, panelHeight = 154, panelGap = 12;
+    const int monitorLeft = monitorTopLeft.x + 8;
+    const int monitorRight = monitorBottomRight.x - 8;
+    const int monitorTop = monitorTopLeft.y + 8;
+    const int monitorBottom = monitorBottomRight.y - 8;
+    const Button& calibrationButton = toolButtons_[8];
+    const int centeredPanelX = (calibrationButton.rect.left + calibrationButton.rect.right - panelWidth) / 2;
+    const int panelX = std::clamp(centeredPanelX, monitorLeft, std::max(monitorLeft, monitorRight - panelWidth));
+    int panelY = toolbarY - panelHeight - panelGap;
+    if (panelY < monitorTop) panelY = toolbarY + buttonSize + panelGap;
+    panelY = std::clamp(panelY, monitorTop, std::max(monitorTop, monitorBottom - panelHeight));
+    calibrationPanelRect_ = {panelX, panelY, panelX + panelWidth, panelY + panelHeight};
+    resetCalibrationRect_ = {panelX + panelWidth - 90, panelY + 10, panelX + panelWidth - 12, panelY + 38};
+    outputBrightnessSliderRect_ = {panelX + 18, panelY + 65, panelX + panelWidth - 18, panelY + 85};
+    highlightCompressionSliderRect_ = {panelX + 18, panelY + 113, panelX + panelWidth - 18, panelY + 133};
 }
 
 int OverlayWindow::buttonAt(POINT point) const noexcept {
+    if (calibrationPanelOpen_) {
+        if (PointIn(outputBrightnessSliderRect_, point)) return CalibrationOutputBrightness;
+        if (PointIn(highlightCompressionSliderRect_, point)) return CalibrationHighlightCompression;
+        if (PointIn(resetCalibrationRect_, point)) return CalibrationReset;
+        if (PointIn(calibrationPanelRect_, point)) return CalibrationPanelSurface;
+    }
     for (const auto& button : modeButtons_) if (PointIn(button.rect, point)) return button.id;
     for (const auto& button : toolButtons_) if (PointIn(button.rect, point)) return button.id;
     return -1;
@@ -515,6 +568,10 @@ void OverlayWindow::activateButton(int id) {
     case ToolUndo: annotations_.undo(); break; case ToolRedo: annotations_.redo(); break;
     case ToolColor: colorIndex_ = (colorIndex_ + 1) % AnnotationColors.size(); break;
     case ToolWidth: lineWidthIndex_ = (lineWidthIndex_ + 1) % AnnotationWidths.size(); break;
+    case ActionHdrCalibration:
+        if (frames_.containsHdr(selection_)) { calibrationPanelOpen_ = !calibrationPanelOpen_; rebuildButtons(); }
+        break;
+    case CalibrationReset: calibration_ = {}; updateCalibrationPreview(); break;
     case ActionCopy: perform(OverlayAction::Copy); break; case ActionSave: perform(OverlayAction::Save); break;
     case ActionCancel: finished_ = true; DestroyWindow(hwnd_); break;
     default: return;
@@ -632,7 +689,7 @@ void OverlayWindow::commitText(bool cancel) {
 
 bool OverlayWindow::perform(OverlayAction action) {
     if (selection_.empty() || !commit_) return false;
-    if (!commit_(hwnd_, action, frames_, selection_, annotations_)) return false;
+    if (!commit_(hwnd_, action, frames_, selection_, annotations_, calibration_)) return false;
     succeeded_ = true; finished_ = true; DestroyWindow(hwnd_); return true;
 }
 
@@ -667,6 +724,35 @@ void OverlayWindow::releaseBackBuffer() noexcept {
     backBufferPrevious_ = nullptr;
     backBufferWidth_ = 0;
     backBufferHeight_ = 0;
+}
+
+int OverlayWindow::calibrationValue(int id) const noexcept {
+    return id == CalibrationOutputBrightness ? calibration_.outputBrightnessPercent
+                                             : calibration_.highlightCompressionPercent;
+}
+
+void OverlayWindow::setCalibrationFromPoint(int id, int x) {
+    const RECT& slider = id == CalibrationOutputBrightness ? outputBrightnessSliderRect_
+                                                            : highlightCompressionSliderRect_;
+    const int start = slider.left;
+    const int end = std::max(start + 1, static_cast<int>(slider.right));
+    const int minimum = id == CalibrationOutputBrightness ? HdrCalibration::MinimumOutputBrightness
+                                                           : HdrCalibration::MinimumHighlightCompression;
+    const int maximum = id == CalibrationOutputBrightness ? HdrCalibration::MaximumOutputBrightness
+                                                           : HdrCalibration::MaximumHighlightCompression;
+    const int value = minimum + MulDiv(std::clamp(x, start, end) - start, maximum - minimum, end - start);
+    if (value == calibrationValue(id)) return;
+    if (id == CalibrationOutputBrightness) calibration_.outputBrightnessPercent = value;
+    else calibration_.highlightCompressionPercent = value;
+    updateCalibrationPreview();
+}
+
+void OverlayWindow::updateCalibrationPreview() {
+    preview_ = ColorPipeline::toneMapToSdr(previewSource_, calibration_);
+    dimmedPreview_ = DimPreview(preview_, 140);
+    maskedPreview_ = dimmedPreview_;
+    maskedSelectionPixels_ = {};
+    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void OverlayWindow::updateMaskedPreview() {
@@ -757,6 +843,61 @@ void OverlayWindow::paint() {
     drawGroupSurface(modeButtons_);
     drawGroupSurface(toolButtons_);
 
+    if (calibrationPanelOpen_) {
+        RECT shadow = calibrationPanelRect_; OffsetRect(&shadow, 2, 3);
+        FillRoundRect(dc, shadow, 13, RGB(15, 15, 16), RGB(15, 15, 16));
+        FillRoundRect(dc, calibrationPanelRect_, 13, RGB(31, 31, 34), RGB(75, 75, 79));
+        SetTextColor(dc, RGB(255, 255, 255));
+        RECT title{calibrationPanelRect_.left + 16, calibrationPanelRect_.top + 10,
+                   resetCalibrationRect_.left - 8, calibrationPanelRect_.top + 38};
+        const auto titleText = Localized(StringId::HdrCalibrationTitle, language_);
+        DrawTextW(dc, titleText.data(), static_cast<int>(titleText.size()), &title,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        const bool resetHovered = hoveredButton_ == CalibrationReset;
+        const bool resetPressed = pressedButton_ == CalibrationReset;
+        FillRoundRect(dc, resetCalibrationRect_, 7,
+                      resetPressed ? RGB(0, 82, 148) : resetHovered ? RGB(62, 62, 66) : RGB(42, 42, 45),
+                      resetHovered ? RGB(92, 92, 97) : RGB(42, 42, 45));
+        const auto resetText = Localized(StringId::ResetCalibration, language_);
+        DrawTextW(dc, resetText.data(), static_cast<int>(resetText.size()), &resetCalibrationRect_,
+                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        const auto drawSlider = [&](int id, StringId labelId, const RECT& slider, int minimum, int maximum) {
+            RECT label{slider.left, slider.top - 22, slider.right, slider.top - 2};
+            const auto labelText = Localized(labelId, language_);
+            SetTextColor(dc, RGB(225, 225, 228));
+            DrawTextW(dc, labelText.data(), static_cast<int>(labelText.size()), &label,
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            wchar_t valueText[16]{};
+            swprintf_s(valueText, L"%d%%", calibrationValue(id));
+            SetTextColor(dc, RGB(255, 255, 255));
+            DrawTextW(dc, valueText, -1, &label, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+            const int centerY = (slider.top + slider.bottom) / 2;
+            RECT track{slider.left, centerY - 2, slider.right, centerY + 2};
+            FillRoundRect(dc, track, 4, RGB(78, 78, 82), RGB(78, 78, 82));
+            const int thumbX = slider.left + MulDiv(calibrationValue(id) - minimum,
+                                                    slider.right - slider.left, maximum - minimum);
+            RECT activeTrack{slider.left, centerY - 2, thumbX, centerY + 2};
+            if (activeTrack.right > activeTrack.left)
+                FillRoundRect(dc, activeTrack, 4, RGB(52, 152, 255), RGB(52, 152, 255));
+            HBRUSH thumbBrush = CreateSolidBrush(RGB(245, 245, 247));
+            HPEN thumbPen = CreatePen(PS_SOLID, 2, RGB(0, 120, 212));
+            const auto previousBrush = SelectObject(dc, thumbBrush);
+            const auto previousPen = SelectObject(dc, thumbPen);
+            Ellipse(dc, thumbX - 7, centerY - 7, thumbX + 8, centerY + 8);
+            SelectObject(dc, previousPen); SelectObject(dc, previousBrush);
+            DeleteObject(thumbPen); DeleteObject(thumbBrush);
+        };
+        drawSlider(CalibrationOutputBrightness, StringId::HdrOutputBrightness,
+                   outputBrightnessSliderRect_, HdrCalibration::MinimumOutputBrightness,
+                   HdrCalibration::MaximumOutputBrightness);
+        drawSlider(CalibrationHighlightCompression, StringId::HdrHighlightCompression,
+                   highlightCompressionSliderRect_, HdrCalibration::MinimumHighlightCompression,
+                   HdrCalibration::MaximumHighlightCompression);
+    }
+
     auto drawButtons = [&](const std::vector<Button>& buttons) {
         for (const auto& button : buttons) {
             const bool active = (button.id == ModeRegion && mode_ == CaptureMode::Region) ||
@@ -764,13 +905,15 @@ void OverlayWindow::paint() {
                                 (button.id == ModeMonitor && mode_ == CaptureMode::Monitor) ||
                                 (button.id == ModeAll && mode_ == CaptureMode::VirtualDesktop) ||
                                 (button.id == ToolPen && tool_ == AnnotationTool::Pen) ||
-                                (button.id == ToolRectangle && tool_ == AnnotationTool::Rectangle) ||
-                                (button.id == ToolArrow && tool_ == AnnotationTool::Arrow) ||
-                                (button.id == ToolText && tool_ == AnnotationTool::Text);
+                                 (button.id == ToolRectangle && tool_ == AnnotationTool::Rectangle) ||
+                                 (button.id == ToolArrow && tool_ == AnnotationTool::Arrow) ||
+                                 (button.id == ToolText && tool_ == AnnotationTool::Text) ||
+                                 (button.id == ActionHdrCalibration && calibrationPanelOpen_);
             const bool hovered = button.id == hoveredButton_;
             const bool pressed = button.id == pressedButton_;
             const bool disabled = (button.id == ToolUndo && !annotations_.canUndo()) ||
-                                  (button.id == ToolRedo && !annotations_.canRedo());
+                                  (button.id == ToolRedo && !annotations_.canRedo()) ||
+                                  (button.id == ActionHdrCalibration && !frames_.containsHdr(selection_));
             const COLORREF background = pressed ? RGB(0, 82, 148)
                                       : active ? RGB(0, 120, 212)
                                       : hovered ? RGB(62, 62, 66)

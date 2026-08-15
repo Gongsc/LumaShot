@@ -159,25 +159,29 @@ void App::finishCapture(std::unique_ptr<CapturePayload> payload) {
     if (!payload || !payload->frames) { notify(StringId::AppName, CaptureService::IsSupported() ? StringId::CaptureFailed : StringId::Unsupported, NIIF_ERROR); return; }
     OverlayWindow overlay(instance_, std::move(*payload->frames), settings_.lastCaptureMode, language_,
                           settings_.includeCursor, settings_.hdrCalibration);
-    overlay.run([this](HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection, const AnnotationDocument& annotations) {
-        return exportCapture(owner, action, frames, selection, annotations);
+    overlay.run([this](HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection,
+                       const AnnotationDocument& annotations, HdrCalibration calibration) {
+        return exportCapture(owner, action, frames, selection, annotations, calibration);
     });
-    settings_.lastCaptureMode = overlay.mode(); (void)settingsStore_.save(settings_);
+    settings_.lastCaptureMode = overlay.mode();
+    settings_.hdrCalibration = overlay.calibration();
+    (void)settingsStore_.save(settings_);
 }
 
-bool App::exportCapture(HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection, const AnnotationDocument& annotations) {
+bool App::exportCapture(HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection,
+                        const AnnotationDocument& annotations, HdrCalibration calibration) {
     try {
         ImageF16 source = ColorPipeline::compose(frames, selection);
         if (source.width == 0 || source.height == 0) throw std::runtime_error("Empty selection");
         if (action == OverlayAction::Copy) {
-            ImageBgra8 image = ColorPipeline::toneMapToSdr(source, settings_.hdrCalibration); AnnotationRenderer::renderSdr(image, annotations);
+            ImageBgra8 image = ColorPipeline::toneMapToSdr(source, calibration); AnnotationRenderer::renderSdr(image, annotations);
             if (!ClipboardService::copy(owner, image)) { MessageBoxW(owner, Localized(StringId::ClipboardFailed, language_).data(), L"LumaShot", MB_OK | MB_ICONERROR); return false; }
             notify(StringId::AppName, StringId::Copied); return true;
         }
         const auto choice = ImageExporter::showSaveDialog(owner, source.hdr, language_);
         if (!choice) return false;
         if (choice->format == ExportFormat::JpegXrHdr) { AnnotationRenderer::renderHdr(source, annotations); ImageExporter::saveJxr(choice->path, source); }
-        else { ImageBgra8 image = ColorPipeline::toneMapToSdr(source, settings_.hdrCalibration); AnnotationRenderer::renderSdr(image, annotations); ImageExporter::savePng(choice->path, image); }
+        else { ImageBgra8 image = ColorPipeline::toneMapToSdr(source, calibration); AnnotationRenderer::renderSdr(image, annotations); ImageExporter::savePng(choice->path, image); }
         notify(StringId::AppName, StringId::Saved); return true;
     } catch (...) {
         const auto message = action == OverlayAction::Copy ? StringId::ClipboardFailed : StringId::SaveFailed;

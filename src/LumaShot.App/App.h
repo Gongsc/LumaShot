@@ -48,7 +48,8 @@ private:
     void finishCapture(std::unique_ptr<CapturePayload> payload);
     void showSettings();
     void applyStartupSetting() noexcept;
-    bool exportCapture(HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection, const AnnotationDocument& annotations);
+    bool exportCapture(HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection,
+                       const AnnotationDocument& annotations, HdrCalibration calibration);
 };
 
 } // namespace lumashot

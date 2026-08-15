@@ -40,11 +40,11 @@ Unsigned builds can trigger Microsoft Defender SmartScreen. Pass a trusted Authe
 
 Launch `LumaShot.exe`; it stays in the notification area. Double-click the icon or use the global hotkey. Choose a capture mode, make or adjust the selection, optionally annotate, then select Copy or Save. HDR selections default to JPEG XR; selecting PNG always creates an SDR-compatible tone-mapped image. Clipboard output is intentionally SDR for application compatibility.
 
-Open Settings to calibrate HDR-to-SDR output with live preview. Output brightness controls overall SDR luminance, while highlight compression restores detail in very bright HDR areas. Calibration affects the capture preview, PNG, and clipboard output; lossless HDR JPEG XR pixels remain unchanged.
+Open HDR calibration directly from the capture toolbar, or from Settings, to adjust HDR-to-SDR output with live preview. Output brightness controls overall SDR luminance, while highlight compression restores detail in very bright HDR areas. Calibration affects the capture preview, PNG, and clipboard output; lossless HDR JPEG XR pixels remain unchanged.
 
 启动 `LumaShot.exe` 后，程序常驻通知区域。双击托盘图标或使用全局快捷键，选择截图模式并调整选区，可添加画笔、矩形、箭头或文字标注，最后选择“复制”或“保存”。HDR 选区默认保存为 JPEG XR；PNG 和剪贴板始终输出经过色调映射的 SDR 图像，以兼容画图、Office 和聊天软件。
 
-可在“设置 > HDR 校准”中通过实时预览调整输出亮度和高光压缩。校准会统一应用于截图预览、PNG 和剪贴板，不改变无损 HDR JPEG XR 的浮点像素。
+可直接在截图工具栏打开“HDR 校准”，也可在“设置 > HDR 校准”中通过实时预览调整输出亮度和高光压缩。校准会统一应用于截图预览、PNG 和剪贴板，不改变无损 HDR JPEG XR 的浮点像素。
 
 快捷键：`Esc` 取消，`Ctrl+C` 复制，`Ctrl+S` 保存，`Ctrl+Z` 撤销，`Ctrl+Y` 重做。完整的 HDR 使用与验证说明见 [`docs/HDR-Guide.md`](docs/HDR-Guide.md)，测试矩阵见 [`docs/TESTING.md`](docs/TESTING.md)。
 
