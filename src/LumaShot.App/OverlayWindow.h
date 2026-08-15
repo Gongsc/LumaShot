@@ -77,6 +77,8 @@ private:
     void updateWindowHover(POINT clientPoint);
     [[nodiscard]] HWND windowAt(POINT screenPoint) const;
     [[nodiscard]] DragKind hitSelection(POINT screenPoint) const noexcept;
+    [[nodiscard]] HCURSOR cursorForPoint(POINT clientPoint) const noexcept;
+    [[nodiscard]] static HCURSOR cursorForDrag(DragKind dragKind) noexcept;
     [[nodiscard]] PointF relativePoint(POINT screenPoint) const noexcept;
     [[nodiscard]] POINT desktopFromClient(POINT clientPoint) const noexcept;
     [[nodiscard]] POINT clientFromDesktop(POINT desktopPoint) const noexcept;

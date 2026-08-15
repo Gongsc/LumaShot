@@ -333,18 +333,22 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     switch (message) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: paint(); return 0;
-    case WM_SETCURSOR:
-        SetCursor(LoadCursorW(nullptr, hoveredButton_ >= 0 ? IDC_HAND : (tool_ == AnnotationTool::Text ? IDC_IBEAM : IDC_CROSS))); return TRUE;
+    case WM_SETCURSOR: {
+        POINT client{};
+        GetCursorPos(&client);
+        ScreenToClient(hwnd_, &client);
+        SetCursor(cursorForPoint(client));
+        return TRUE;
+    }
     case WM_MOUSEMOVE: {
         POINT client = PointFromLParam(lparam);
         const int hovered = buttonAt(client);
         if (hovered != hoveredButton_) {
             hoveredButton_ = hovered;
-            SetCursor(LoadCursorW(nullptr, hoveredButton_ >= 0 ? IDC_HAND : (tool_ == AnnotationTool::Text ? IDC_IBEAM : IDC_CROSS)));
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd_, 0}; TrackMouseEvent(&tracking);
-        if (pressedButton_ >= 0) return 0;
+        if (pressedButton_ >= 0) { SetCursor(cursorForPoint(client)); return 0; }
         POINT screen = desktopFromClient(client);
         if ((wparam & MK_LBUTTON) != 0) {
             if (dragKind_ == DragKind::Drawing) updateDrawing(screen);
@@ -361,6 +365,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
         } else if (mode_ == CaptureMode::Window && !selectionLocked_) updateWindowHover(client);
+        SetCursor(cursorForPoint(client));
         return 0;
     }
     case WM_MOUSELEAVE:
@@ -372,6 +377,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         if (const int button = buttonAt(client); button >= 0) {
             pressedButton_ = button;
             SetCapture(hwnd_);
+            SetCursor(LoadCursorW(nullptr, IDC_HAND));
             InvalidateRect(hwnd_, nullptr, FALSE); UpdateWindow(hwnd_); return 0;
         }
         POINT screen = desktopFromClient(client);
@@ -405,6 +411,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         dragStart_ = screen; initialSelection_ = selection_;
         if (dragKind_ == DragKind::NewSelection) selection_ = {screen.x, screen.y, screen.x, screen.y};
         SetCapture(hwnd_);
+        SetCursor(cursorForDrag(dragKind_));
         return 0;
     }
     case WM_LBUTTONUP: {
@@ -413,6 +420,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             const bool activate = buttonAt(PointFromLParam(lparam)) == pressed;
             pressedButton_ = -1; ReleaseCapture(); InvalidateRect(hwnd_, nullptr, FALSE);
             if (activate) activateButton(pressed);
+            SetCursor(cursorForPoint(PointFromLParam(lparam)));
             return 0;
         }
         if (dragKind_ == DragKind::Drawing) finishDrawing();
@@ -420,7 +428,9 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             POINT screen = desktopFromClient(PointFromLParam(lparam));
             uiMonitor_ = MonitorFromPoint(screen, MONITOR_DEFAULTTONEAREST);
         }
-        dragKind_ = DragKind::None; ReleaseCapture(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+        dragKind_ = DragKind::None; ReleaseCapture(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
+        SetCursor(cursorForPoint(PointFromLParam(lparam)));
+        return 0;
     }
     case WM_CAPTURECHANGED:
         if (pressedButton_ >= 0) { pressedButton_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
@@ -557,12 +567,46 @@ void OverlayWindow::updateWindowHover(POINT clientPoint) {
 OverlayWindow::DragKind OverlayWindow::hitSelection(POINT point) const noexcept {
     if (selection_.empty()) return DragKind::None;
     constexpr int radius = 7;
+    if (point.x < selection_.left - radius || point.x > selection_.right + radius ||
+        point.y < selection_.top - radius || point.y > selection_.bottom + radius) return DragKind::None;
     const bool left = std::abs(point.x - selection_.left) <= radius, right = std::abs(point.x - selection_.right) <= radius;
     const bool top = std::abs(point.y - selection_.top) <= radius, bottom = std::abs(point.y - selection_.bottom) <= radius;
     if (left && top) return DragKind::TopLeft; if (right && top) return DragKind::TopRight;
     if (left && bottom) return DragKind::BottomLeft; if (right && bottom) return DragKind::BottomRight;
     if (left) return DragKind::Left; if (right) return DragKind::Right; if (top) return DragKind::Top; if (bottom) return DragKind::Bottom;
     return ContainsPoint(selection_, point.x, point.y) ? DragKind::Move : DragKind::None;
+}
+
+HCURSOR OverlayWindow::cursorForPoint(POINT clientPoint) const noexcept {
+    if (pressedButton_ >= 0 || buttonAt(clientPoint) >= 0) return LoadCursorW(nullptr, IDC_HAND);
+    if (GetCapture() == hwnd_ && dragKind_ != DragKind::None) return cursorForDrag(dragKind_);
+    if (mode_ == CaptureMode::Window && !selectionLocked_) return LoadCursorW(nullptr, IDC_ARROW);
+
+    const POINT desktopPoint = desktopFromClient(clientPoint);
+    if (!selection_.empty() && tool_ != AnnotationTool::None &&
+        ContainsPoint(selection_, desktopPoint.x, desktopPoint.y)) {
+        return LoadCursorW(nullptr, tool_ == AnnotationTool::Text ? IDC_IBEAM : IDC_CROSS);
+    }
+
+    const DragKind hit = hitSelection(desktopPoint);
+    return hit == DragKind::None ? LoadCursorW(nullptr, IDC_CROSS) : cursorForDrag(hit);
+}
+
+HCURSOR OverlayWindow::cursorForDrag(DragKind dragKind) noexcept {
+    switch (dragKind) {
+    case DragKind::Left:
+    case DragKind::Right: return LoadCursorW(nullptr, IDC_SIZEWE);
+    case DragKind::Top:
+    case DragKind::Bottom: return LoadCursorW(nullptr, IDC_SIZENS);
+    case DragKind::TopLeft:
+    case DragKind::BottomRight: return LoadCursorW(nullptr, IDC_SIZENWSE);
+    case DragKind::TopRight:
+    case DragKind::BottomLeft: return LoadCursorW(nullptr, IDC_SIZENESW);
+    case DragKind::Move: return LoadCursorW(nullptr, IDC_SIZEALL);
+    case DragKind::NewSelection:
+    case DragKind::Drawing: return LoadCursorW(nullptr, IDC_CROSS);
+    default: return LoadCursorW(nullptr, IDC_ARROW);
+    }
 }
 
 PointF OverlayWindow::relativePoint(POINT point) const noexcept {
