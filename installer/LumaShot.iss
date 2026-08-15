@@ -1,5 +1,5 @@
 #define MyAppName "LumaShot"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "0.1.0"
 #define MyAppExeName "LumaShot.exe"
 
 [Setup]
@@ -31,6 +31,7 @@ Name: "startup"; Description: "{cm:StartupTask}"; GroupDescription: "{cm:Additio
 [Files]
 Source: "..\bin\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
