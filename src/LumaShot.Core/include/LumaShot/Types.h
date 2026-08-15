@@ -102,12 +102,13 @@ struct HdrCalibration {
 };
 
 struct AppSettings {
-    static constexpr int CurrentSchemaVersion = 3;
+    static constexpr int CurrentSchemaVersion = 4;
     int schemaVersion{CurrentSchemaVersion};
     Language language{Language::Automatic};
     HotkeyBinding hotkey;
     CaptureMode lastCaptureMode{CaptureMode::Region};
     bool includeCursor{false};
+    bool copyOnEnter{true};
     bool launchAtLogin{false};
     HdrCalibration hdrCalibration;
 };

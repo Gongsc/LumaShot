@@ -68,6 +68,7 @@ void AnnotationTests() {
           !Localized(StringId::Behavior, Language::SimplifiedChinese).empty() &&
           !Localized(StringId::HdrCalibrationTitle, Language::SimplifiedChinese).empty() &&
           Localized(StringId::StartCalibration, Language::English) == L"Start calibration" &&
+          Localized(StringId::CopyOnEnter, Language::English) == L"Press Enter to copy screenshot" &&
           !Localized(StringId::CalibrationInstructions, Language::SimplifiedChinese).empty() &&
           !Localized(StringId::HdrCalibrationUnavailable, Language::English).empty() &&
           !Localized(StringId::HdrOutputBrightness, Language::English).empty(),
@@ -78,12 +79,12 @@ void SettingsTests(const std::filesystem::path& base) {
     const auto path = base / L"settings.json";
     SettingsStore store(path);
     AppSettings settings; settings.language = Language::English; settings.lastCaptureMode = CaptureMode::VirtualDesktop;
-    settings.includeCursor = true; settings.hotkey.virtualKey = 'Q';
+    settings.includeCursor = true; settings.copyOnEnter = false; settings.hotkey.virtualKey = 'Q';
     settings.hdrCalibration.outputBrightnessPercent = 72;
     settings.hdrCalibration.highlightCompressionPercent = 61;
     Check(store.save(settings), "saves settings atomically");
     const auto loaded = store.load();
-    Check(loaded.language == Language::English && loaded.lastCaptureMode == CaptureMode::VirtualDesktop && loaded.includeCursor &&
+    Check(loaded.language == Language::English && loaded.lastCaptureMode == CaptureMode::VirtualDesktop && loaded.includeCursor && !loaded.copyOnEnter &&
           loaded.hotkey.virtualKey == 'Q' && loaded.hdrCalibration.outputBrightnessPercent == 72 &&
           loaded.hdrCalibration.highlightCompressionPercent == 61, "loads settings round trip");
     {
@@ -96,7 +97,7 @@ void SettingsTests(const std::filesystem::path& base) {
     }
     const auto migrated = store.load();
     Check(migrated.schemaVersion == AppSettings::CurrentSchemaVersion && migrated.language == Language::English &&
-          migrated.includeCursor && migrated.hdrCalibration.outputBrightnessPercent == HdrCalibration::DefaultOutputBrightness &&
+          migrated.includeCursor && migrated.copyOnEnter && migrated.hdrCalibration.outputBrightnessPercent == HdrCalibration::DefaultOutputBrightness &&
           migrated.hdrCalibration.highlightCompressionPercent == HdrCalibration::DefaultHighlightCompression,
           "migrates schema 1 settings with HDR calibration defaults");
     {

@@ -17,6 +17,7 @@ constexpr int StartupCheckbox = 1004;
 constexpr int SaveButton = 1005;
 constexpr int CancelButton = 1006;
 constexpr int StartCalibrationButton = 1007;
+constexpr int CopyOnEnterCheckbox = 1008;
 constexpr int LanguageLabel = 1101;
 constexpr int HotkeyLabel = 1102;
 
@@ -371,6 +372,10 @@ void SettingsWindow::createControls() {
     HWND cursorBox = AddControl(hwnd_, 0, L"BUTTON", cursor.data(), BS_AUTOCHECKBOX | WS_TABSTOP,
                                 CursorCheckbox, instance_);
     SendMessageW(cursorBox, BM_SETCHECK, settings_.includeCursor ? BST_CHECKED : BST_UNCHECKED, 0);
+    const auto copyOnEnter = Localized(StringId::CopyOnEnter, displayLanguage_);
+    HWND copyOnEnterBox = AddControl(hwnd_, 0, L"BUTTON", copyOnEnter.data(), BS_AUTOCHECKBOX | WS_TABSTOP,
+                                     CopyOnEnterCheckbox, instance_);
+    SendMessageW(copyOnEnterBox, BM_SETCHECK, settings_.copyOnEnter ? BST_CHECKED : BST_UNCHECKED, 0);
     const auto startup = Localized(StringId::LaunchAtLogin, displayLanguage_);
     HWND startupBox = AddControl(hwnd_, 0, L"BUTTON", startup.data(), BS_AUTOCHECKBOX | WS_TABSTOP,
                                  StartupCheckbox, instance_);
@@ -391,7 +396,7 @@ void SettingsWindow::createControls() {
     SetWindowSubclass(calibrationButton, ActionButtonProc, StartCalibrationButton, reinterpret_cast<DWORD_PTR>(this));
     SetWindowSubclass(language, InputControlProc, LanguageCombo, reinterpret_cast<DWORD_PTR>(this));
     SetWindowSubclass(hotkey, InputControlProc, HotkeyControl, reinterpret_cast<DWORD_PTR>(this));
-    for (HWND control : {languageText, language, hotkeyText, hotkey, cursorBox, startupBox,
+    for (HWND control : {languageText, language, hotkeyText, hotkey, cursorBox, copyOnEnterBox, startupBox,
                          calibrationButton, saveButton, cancelButton}) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
         SetWindowTheme(control, dark_ ? L"DarkMode_Explorer" : L"Explorer", nullptr);
@@ -411,8 +416,9 @@ void SettingsWindow::layoutControls() {
     MoveWindow(GetDlgItem(hwnd_, HotkeyLabel), scale(44), scale(178), scale(180), scale(24), TRUE);
     MoveWindow(GetDlgItem(hwnd_, HotkeyControl), inputX, scale(169), inputWidth, scale(34), TRUE);
     MoveWindow(GetDlgItem(hwnd_, CursorCheckbox), scale(44), scale(271), client.right - scale(88), scale(25), TRUE);
-    MoveWindow(GetDlgItem(hwnd_, StartupCheckbox), scale(44), scale(297), client.right - scale(88), scale(25), TRUE);
-    MoveWindow(GetDlgItem(hwnd_, StartCalibrationButton), client.right - scale(184), scale(359),
+    MoveWindow(GetDlgItem(hwnd_, CopyOnEnterCheckbox), scale(44), scale(297), client.right - scale(88), scale(25), TRUE);
+    MoveWindow(GetDlgItem(hwnd_, StartupCheckbox), scale(44), scale(323), client.right - scale(88), scale(25), TRUE);
+    MoveWindow(GetDlgItem(hwnd_, StartCalibrationButton), client.right - scale(184), scale(385),
                scale(140), scale(38), TRUE);
 
     constexpr int actionWidth = 96;
@@ -438,9 +444,9 @@ void SettingsWindow::paint() {
     const COLORREF border = dark_ ? DarkBorder : LightBorder;
     FillRoundedRect(dc, {scale(24), scale(88), client.right - scale(24), scale(218)},
                     scale(12), card, border);
-    FillRoundedRect(dc, {scale(24), scale(230), client.right - scale(24), scale(322)},
+    FillRoundedRect(dc, {scale(24), scale(230), client.right - scale(24), scale(348)},
                     scale(12), card, border);
-    FillRoundedRect(dc, {scale(24), scale(334), client.right - scale(24), scale(414)},
+    FillRoundedRect(dc, {scale(24), scale(360), client.right - scale(24), scale(440)},
                     scale(12), card, border);
 
     SetBkMode(dc, TRANSPARENT);
@@ -468,12 +474,12 @@ void SettingsWindow::paint() {
     const auto behaviorText = Localized(StringId::Behavior, displayLanguage_);
     DrawTextW(dc, behaviorText.data(), static_cast<int>(behaviorText.size()), &behaviorCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    RECT calibrationCaption{scale(44), scale(346), client.right - scale(204), scale(369)};
+    RECT calibrationCaption{scale(44), scale(372), client.right - scale(204), scale(395)};
     const auto calibrationText = Localized(StringId::HdrCalibrationTitle, displayLanguage_);
     DrawTextW(dc, calibrationText.data(), static_cast<int>(calibrationText.size()), &calibrationCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(dc, bodyFont_);
-    RECT calibrationHint{scale(44), scale(371), client.right - scale(204), scale(400)};
+    RECT calibrationHint{scale(44), scale(397), client.right - scale(204), scale(426)};
     const auto hintText = Localized(StringId::HdrCalibrationHint, displayLanguage_);
     DrawTextW(dc, hintText.data(), static_cast<int>(hintText.size()), &calibrationHint,
               DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -658,6 +664,7 @@ void SettingsWindow::readControls() {
     if (flags & HOTKEYF_SHIFT) settings_.hotkey.modifiers |= MOD_SHIFT;
     if (flags & HOTKEYF_ALT) settings_.hotkey.modifiers |= MOD_ALT;
     settings_.includeCursor = IsDlgButtonChecked(hwnd_, CursorCheckbox) == BST_CHECKED;
+    settings_.copyOnEnter = IsDlgButtonChecked(hwnd_, CopyOnEnterCheckbox) == BST_CHECKED;
     settings_.launchAtLogin = IsDlgButtonChecked(hwnd_, StartupCheckbox) == BST_CHECKED;
 }
 

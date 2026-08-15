@@ -188,7 +188,7 @@ void App::finishCapture(std::unique_ptr<CapturePayload> payload) {
     }
     capturing_ = false;
     OverlayWindow overlay(instance_, std::move(*payload->frames), payload->mode, language_,
-                          settings_.includeCursor, settings_.hdrCalibration);
+                          settings_.includeCursor, settings_.copyOnEnter, settings_.hdrCalibration);
     overlay.run([this](HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection,
                        const AnnotationDocument& annotations, HdrCalibration calibration) {
         return exportCapture(owner, action, frames, selection, annotations, calibration);

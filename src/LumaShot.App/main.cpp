@@ -1,9 +1,22 @@
 #include "App.h"
 #include <commctrl.h>
+#include <shlobj_core.h>
 #include <winrt/base.h>
+
+namespace {
+void RefreshExecutableIcon() noexcept {
+    wchar_t path[MAX_PATH]{};
+    constexpr DWORD pathCapacity = static_cast<DWORD>(ARRAYSIZE(path));
+    const DWORD length = GetModuleFileNameW(nullptr, path, pathCapacity);
+    if (length > 0 && length < pathCapacity) {
+        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, path, nullptr);
+    }
+}
+}
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    RefreshExecutableIcon();
     HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\LumaShot.SingleInstance");
     if (!mutex) return 1;
     if (GetLastError() == ERROR_ALREADY_EXISTS) {

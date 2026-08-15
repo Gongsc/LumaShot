@@ -407,9 +407,9 @@ void FillRoundRect(HDC dc, const RECT& rect, int radius, COLORREF fill, COLORREF
 } // namespace
 
 OverlayWindow::OverlayWindow(HINSTANCE instance, CaptureFrameSet frames, CaptureMode mode, Language language,
-                             bool includeCursor, HdrCalibration calibration)
+                             bool includeCursor, bool copyOnEnter, HdrCalibration calibration)
     : instance_(instance), frames_(std::move(frames)), mode_(mode), language_(language),
-      includeCursor_(includeCursor), calibration_(calibration) {
+      includeCursor_(includeCursor), copyOnEnter_(copyOnEnter), calibration_(calibration) {
     previewSource_ = ColorPipeline::compose(frames_, frames_.virtualDesktop);
     updateCalibrationPreview();
 }
@@ -509,25 +509,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         }
         POINT screen = desktopFromClient(client);
         if (mode_ == CaptureMode::Window && !selectionLocked_) {
-            if (hoveredWindow_ && !selection_.empty()) {
-                try {
-                    ShowWindow(hwnd_, SW_HIDE);
-                    CaptureService service;
-                    auto frame = service.captureWindow(hoveredWindow_, includeCursor_);
-                    ShowWindow(hwnd_, SW_SHOW); SetForegroundWindow(hwnd_);
-                    selection_ = ClampRect(frame.desktopRect, frames_.virtualDesktop);
-                    RECT selectedRect = ToWin32Rect(selection_);
-                    uiMonitor_ = frame.monitor ? frame.monitor : MonitorFromRect(&selectedRect, MONITOR_DEFAULTTONEAREST);
-                    frames_.monitors.push_back(std::move(frame));
-                    previewSource_ = ColorPipeline::compose(frames_, frames_.virtualDesktop);
-                    updateCalibrationPreview();
-                    selectionLocked_ = true;
-                } catch (...) {
-                    ShowWindow(hwnd_, SW_SHOW); SetForegroundWindow(hwnd_);
-                    MessageBoxW(hwnd_, Localized(StringId::CaptureFailed, language_).data(), L"LumaShot", MB_OK | MB_ICONERROR);
-                }
-            }
-            rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+            (void)lockHoveredWindow();
+            return 0;
         }
         if (!selection_.empty() && tool_ != AnnotationTool::None && ContainsPoint(selection_, screen.x, screen.y)) {
             if (tool_ == AnnotationTool::Text) beginText(screen); else beginDrawing(screen);
@@ -565,6 +548,13 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_KEYDOWN: {
         const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         if (wparam == VK_ESCAPE) { finished_ = true; DestroyWindow(hwnd_); return 0; }
+        if (copyOnEnter_ && wparam == VK_RETURN) {
+            if (!textEditor_ && dragKind_ == DragKind::None && pressedButton_ < 0 &&
+                (mode_ != CaptureMode::Window || selectionLocked_ || lockHoveredWindow())) {
+                (void)perform(OverlayAction::Copy);
+            }
+            return 0;
+        }
         if (control && wparam == 'C') { perform(OverlayAction::Copy); return 0; }
         if (control && wparam == 'S') { perform(OverlayAction::Save); return 0; }
         if (control && wparam == 'Z') { annotations_.undo(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
@@ -689,6 +679,31 @@ void OverlayWindow::updateWindowHover(POINT clientPoint) {
         selection_ = ClampRect(FromWin32Rect(rect), frames_.virtualDesktop);
     }
     rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+bool OverlayWindow::lockHoveredWindow() {
+    if (!hoveredWindow_ || selection_.empty()) return false;
+    try {
+        ShowWindow(hwnd_, SW_HIDE);
+        CaptureService service;
+        auto frame = service.captureWindow(hoveredWindow_, includeCursor_);
+        ShowWindow(hwnd_, SW_SHOW);
+        SetForegroundWindow(hwnd_);
+        selection_ = ClampRect(frame.desktopRect, frames_.virtualDesktop);
+        RECT selectedRect = ToWin32Rect(selection_);
+        uiMonitor_ = frame.monitor ? frame.monitor : MonitorFromRect(&selectedRect, MONITOR_DEFAULTTONEAREST);
+        frames_.monitors.push_back(std::move(frame));
+        previewSource_ = ColorPipeline::compose(frames_, frames_.virtualDesktop);
+        updateCalibrationPreview();
+        selectionLocked_ = true;
+    } catch (...) {
+        ShowWindow(hwnd_, SW_SHOW);
+        SetForegroundWindow(hwnd_);
+        MessageBoxW(hwnd_, Localized(StringId::CaptureFailed, language_).data(), L"LumaShot", MB_OK | MB_ICONERROR);
+    }
+    rebuildButtons();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    return selectionLocked_;
 }
 
 OverlayWindow::DragKind OverlayWindow::hitSelection(POINT point) const noexcept {

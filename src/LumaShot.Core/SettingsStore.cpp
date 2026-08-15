@@ -79,6 +79,7 @@ AppSettings SettingsStore::load() const noexcept {
         if (const auto value = UIntValue(json, "hotkeyVirtualKey")) result.hotkey.virtualKey = static_cast<UINT>(*value);
         if (const auto value = StringValue(json, "lastCaptureMode")) result.lastCaptureMode = ParseCaptureMode(*value);
         if (const auto value = BoolValue(json, "includeCursor")) result.includeCursor = *value;
+        if (const auto value = BoolValue(json, "copyOnEnter")) result.copyOnEnter = *value;
         if (const auto value = BoolValue(json, "launchAtLogin")) result.launchAtLogin = *value;
         // Schema 3 changes calibration from a global Reinhard exposure control
         // to an SDR-white-normalized highlight shoulder. Old values are not
@@ -112,6 +113,7 @@ bool SettingsStore::save(const AppSettings& settings) const noexcept {
                << "  \"hotkeyVirtualKey\": " << settings.hotkey.virtualKey << ",\n"
                << "  \"lastCaptureMode\": \"" << ToString(settings.lastCaptureMode) << "\",\n"
                << "  \"includeCursor\": " << (settings.includeCursor ? "true" : "false") << ",\n"
+               << "  \"copyOnEnter\": " << (settings.copyOnEnter ? "true" : "false") << ",\n"
                << "  \"launchAtLogin\": " << (settings.launchAtLogin ? "true" : "false") << ",\n"
                << "  \"hdrOutputBrightnessPercent\": " << std::clamp(settings.hdrCalibration.outputBrightnessPercent,
                     HdrCalibration::MinimumOutputBrightness, HdrCalibration::MaximumOutputBrightness) << ",\n"

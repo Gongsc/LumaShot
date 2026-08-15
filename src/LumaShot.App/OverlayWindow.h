@@ -14,7 +14,7 @@ using CommitHandler = std::function<bool(HWND, OverlayAction, const CaptureFrame
 class OverlayWindow {
 public:
     OverlayWindow(HINSTANCE instance, CaptureFrameSet frames, CaptureMode mode, Language language,
-                  bool includeCursor, HdrCalibration calibration);
+                  bool includeCursor, bool copyOnEnter, HdrCalibration calibration);
     bool run(const CommitHandler& commit);
     [[nodiscard]] CaptureMode mode() const noexcept { return mode_; }
     [[nodiscard]] HdrCalibration calibration() const noexcept { return calibration_; }
@@ -35,6 +35,7 @@ private:
     CaptureMode mode_;
     Language language_;
     bool includeCursor_{};
+    bool copyOnEnter_{};
     HdrCalibration calibration_;
     RectI selection_{};
     RectI initialSelection_{};
@@ -75,6 +76,7 @@ private:
     void activateButton(int id);
     void setMode(CaptureMode mode);
     void updateWindowHover(POINT clientPoint);
+    [[nodiscard]] bool lockHoveredWindow();
     [[nodiscard]] HWND windowAt(POINT screenPoint) const;
     [[nodiscard]] DragKind hitSelection(POINT screenPoint) const noexcept;
     [[nodiscard]] HCURSOR cursorForPoint(POINT clientPoint) const noexcept;

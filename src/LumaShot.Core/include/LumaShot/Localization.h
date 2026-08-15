@@ -6,7 +6,7 @@ namespace lumashot {
 enum class StringId {
     AppName, Capture, Region, Window, Monitor, VirtualDesktop, Settings, Exit,
     Copy, Save, Cancel, Pen, Rectangle, Arrow, Text, Undo, Redo, Color, LineWidth,
-    Language, Automatic, Chinese, English, Hotkey, IncludeCursor, LaunchAtLogin,
+    Language, Automatic, Chinese, English, Hotkey, IncludeCursor, CopyOnEnter, LaunchAtLogin,
     SettingsSubtitle, CaptureControls, Behavior, HdrCalibrationTitle, HdrCalibrationHint,
     HdrOutputBrightness, HdrHighlightCompression, StartCalibration, CalibrationInstructions,
     ResetCalibration, Apply, HdrCalibrationUnavailable,
