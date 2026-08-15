@@ -25,7 +25,13 @@ HdrCalibration EffectiveCalibration(const ImageF16& source, HdrCalibration calib
     return calibration;
 }
 
-bool TryDirect2DToneMap(const ImageF16& source, HdrCalibration calibration, ImageBgra8& result) noexcept {
+float SdrWhiteScale(bool hdr, float sdrWhiteLevelNits) noexcept {
+    if (!hdr || !std::isfinite(sdrWhiteLevelNits)) return 1.0f;
+    return D2D1_SCENE_REFERRED_SDR_WHITE_LEVEL /
+           std::max(D2D1_SCENE_REFERRED_SDR_WHITE_LEVEL, sdrWhiteLevelNits);
+}
+
+bool TryDirect2DEncode(const ImageF16& source, float linearScale, ImageBgra8& result) noexcept {
     try {
         constexpr D3D_FEATURE_LEVEL levels[]{D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
         ComPtr<ID3D11Device> d3d;
@@ -87,35 +93,24 @@ bool TryDirect2DToneMap(const ImageF16& source, HdrCalibration calibration, Imag
         ComPtr<ID2D1Bitmap1> targetBitmap;
         if (FAILED(context->CreateBitmapFromDxgiSurface(outputSurface.Get(), &targetProperties, &targetBitmap))) return false;
 
-        float measuredMax = 80.0f;
-        for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(source.width) * source.height; ++pixel) {
-            const auto offset = pixel * 4;
-            const float luminance = (0.2126f * ColorPipeline::halfToFloat(source.rgba[offset]) +
-                                     0.7152f * ColorPipeline::halfToFloat(source.rgba[offset + 1]) +
-                                     0.0722f * ColorPipeline::halfToFloat(source.rgba[offset + 2])) * 80.0f;
-            if (std::isfinite(luminance)) measuredMax = std::max(measuredMax, luminance);
-        }
-        measuredMax = std::min(measuredMax, std::max(80.0f, source.maxLuminanceNits));
-        const float compression = 1.0f + 1.5f * static_cast<float>(calibration.highlightCompressionPercent) / 100.0f;
-        measuredMax *= compression;
-        const float outputMax = 80.0f * static_cast<float>(calibration.outputBrightnessPercent) / 100.0f;
-        measuredMax = std::max(measuredMax, outputMax);
-
-        ComPtr<ID2D1Effect> toneMap;
-        if (FAILED(context->CreateEffect(CLSID_D2D1HdrToneMap, &toneMap))) return false;
-        toneMap->SetInput(0, sourceBitmap.Get());
-        if (FAILED(toneMap->SetValue(D2D1_HDRTONEMAP_PROP_INPUT_MAX_LUMINANCE, measuredMax)) ||
-            FAILED(toneMap->SetValue(D2D1_HDRTONEMAP_PROP_OUTPUT_MAX_LUMINANCE, outputMax)) ||
-            FAILED(toneMap->SetValue(D2D1_HDRTONEMAP_PROP_DISPLAY_MODE, D2D1_HDRTONEMAP_DISPLAY_MODE_SDR))) return false;
+        // WGC captures the HDR desktop after DWM has boosted SDR surfaces to
+        // the user's SDR white level. Undo that boost before encoding a normal
+        // sRGB file. This preserves SDR midtones instead of feeding them into a
+        // global HDR curve merely because the monitor has HDR enabled.
+        ComPtr<ID2D1Effect> whiteNormalization;
+        if (FAILED(context->CreateEffect(CLSID_D2D1ColorMatrix, &whiteNormalization))) return false;
+        whiteNormalization->SetInput(0, sourceBitmap.Get());
+        const D2D1_MATRIX_5X4_F matrix = D2D1::Matrix5x4F(
+            linearScale, 0, 0, 0,
+            0, linearScale, 0, 0,
+            0, 0, linearScale, 0,
+            0, 0, 0, 1,
+            0, 0, 0, 0);
+        if (FAILED(whiteNormalization->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, matrix))) return false;
 
         ComPtr<ID2D1Effect> colorManagement;
         if (FAILED(context->CreateEffect(CLSID_D2D1ColorManagement, &colorManagement))) return false;
-        // The tone-map target is an SDR file whose reference white is already
-        // 80 nits (scRGB 1.0). A display-white adjustment is only needed when
-        // the result is being composed onto a particular HDR display. Applying
-        // the captured monitor's SDR white here scales the file a second time
-        // (80 / SDRWhite), which visibly darkens a 240-nit desktop by 3x.
-        colorManagement->SetInputEffect(0, toneMap.Get());
+        colorManagement->SetInputEffect(0, whiteNormalization.Get());
         if (FAILED(colorManagement->SetValue(D2D1_COLORMANAGEMENT_PROP_SOURCE_COLOR_CONTEXT, scRgb.Get())) ||
             FAILED(colorManagement->SetValue(D2D1_COLORMANAGEMENT_PROP_DESTINATION_COLOR_CONTEXT, sRgb.Get())) ||
             FAILED(colorManagement->SetValue(D2D1_COLORMANAGEMENT_PROP_QUALITY, D2D1_COLORMANAGEMENT_QUALITY_BEST))) return false;
@@ -197,6 +192,8 @@ ImageF16 ColorPipeline::compose(const CaptureFrameSet& frames, RectI selection) 
         const int desktopWidth = frame.desktopRect.width();
         const int desktopHeight = frame.desktopRect.height();
         if (desktopWidth <= 0 || desktopHeight <= 0 || frame.width == 0 || frame.height == 0) continue;
+        result.toneRegions.push_back({{targetX, targetY, targetX + overlap.width(), targetY + overlap.height()},
+                                      frame.hdrEnabled, frame.sdrWhiteLevelNits});
         if (frame.width == static_cast<UINT>(desktopWidth) && frame.height == static_cast<UINT>(desktopHeight)) {
             const int sourceX = overlap.left - frame.desktopRect.left;
             const int sourceY = overlap.top - frame.desktopRect.top;
@@ -233,6 +230,12 @@ ImageF16 ColorPipeline::thumbnail(const ImageF16& source, UINT maximumWidth, UIN
     result.width = width; result.height = height; result.hdr = source.hdr;
     result.maxLuminanceNits = source.maxLuminanceNits;
     result.sdrWhiteLevelNits = source.sdrWhiteLevelNits;
+    const RectI sourceBounds{0, 0, static_cast<int>(source.width), static_cast<int>(source.height)};
+    const RectI targetBounds{0, 0, static_cast<int>(width), static_cast<int>(height)};
+    for (const auto& region : source.toneRegions) {
+        const RectI mapped = ClampRect(MapRectBetweenRects(region.pixels, sourceBounds, targetBounds), targetBounds);
+        if (!mapped.empty()) result.toneRegions.push_back({mapped, region.hdr, region.sdrWhiteLevelNits});
+    }
     result.rgba.resize(static_cast<std::size_t>(width) * height * 4);
     for (UINT y = 0; y < height; ++y) {
         const UINT sourceY = std::min(source.height - 1,
@@ -250,38 +253,71 @@ ImageF16 ColorPipeline::thumbnail(const ImageF16& source, UINT maximumWidth, UIN
 
 ImageBgra8 ColorPipeline::toneMapToSdr(const ImageF16& source, HdrCalibration calibration) {
     calibration = EffectiveCalibration(source, calibration);
+    bool uniformTone = true;
+    bool uniformHdr = source.hdr;
+    float uniformWhite = source.sdrWhiteLevelNits;
+    if (!source.toneRegions.empty()) {
+        uniformHdr = source.toneRegions.front().hdr;
+        uniformWhite = source.toneRegions.front().sdrWhiteLevelNits;
+        for (const auto& region : source.toneRegions) {
+            if (region.hdr != uniformHdr || std::abs(region.sdrWhiteLevelNits - uniformWhite) > 0.01f) {
+                uniformTone = false;
+                break;
+            }
+        }
+    }
+    const float hdrOutputScale = static_cast<float>(calibration.outputBrightnessPercent) / 100.0f;
+    const float hdrCompression = static_cast<float>(calibration.highlightCompressionPercent) / 100.0f;
+    const float uniformOutputScale = uniformHdr ? hdrOutputScale : 1.0f;
+    const float uniformCompression = uniformHdr ? hdrCompression : 0.0f;
     ImageBgra8 direct2d;
-    if (source.width > 0 && source.height > 0 && TryDirect2DToneMap(source, calibration, direct2d)) return direct2d;
+    if (uniformTone && uniformCompression == 0.0f && source.width > 0 && source.height > 0 &&
+        TryDirect2DEncode(source, SdrWhiteScale(uniformHdr, uniformWhite) * uniformOutputScale, direct2d)) return direct2d;
     ImageBgra8 result{source.width, source.height};
     result.pixels.resize(static_cast<std::size_t>(source.width) * source.height * 4);
-    float measuredMax = 80.0f;
-    for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(source.width) * source.height; ++pixel) {
-        const auto offset = pixel * 4;
-        const float luminance = (0.2126f * halfToFloat(source.rgba[offset]) +
-                                 0.7152f * halfToFloat(source.rgba[offset + 1]) +
-                                 0.0722f * halfToFloat(source.rgba[offset + 2])) * 80.0f;
-        if (std::isfinite(luminance)) measuredMax = std::max(measuredMax, luminance);
-    }
-    measuredMax = std::min(measuredMax, std::max(80.0f, source.maxLuminanceNits));
-    measuredMax *= 1.0f + 1.5f * static_cast<float>(calibration.highlightCompressionPercent) / 100.0f;
-    const float peak = std::max(1.0f, measuredMax / 80.0f);
-    const float outputScale = static_cast<float>(calibration.outputBrightnessPercent) / 100.0f;
-    auto encode = [peak, outputScale, hdr = source.hdr](float linear) {
-        linear = std::max(0.0f, linear);
-        if (hdr && peak > 1.0f) {
-            // Luminance-preserving Reinhard shoulder normalized so diffuse white remains stable.
-            linear = (linear * (1.0f + linear / (peak * peak))) / (1.0f + linear);
-        }
-        linear = std::clamp(linear * outputScale, 0.0f, 1.0f);
+    auto encode = [](float linear) {
+        linear = std::clamp(linear, 0.0f, 1.0f);
         const float srgb = linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
         return static_cast<std::uint8_t>(std::lround(std::clamp(srgb, 0.0f, 1.0f) * 255.0f));
     };
     for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(source.width) * source.height; ++pixel) {
         const auto input = pixel * 4;
         const auto output = pixel * 4;
-        result.pixels[output] = encode(halfToFloat(source.rgba[input + 2]));
-        result.pixels[output + 1] = encode(halfToFloat(source.rgba[input + 1]));
-        result.pixels[output + 2] = encode(halfToFloat(source.rgba[input]));
+        bool pixelHdr = uniformHdr;
+        float pixelWhite = uniformWhite;
+        if (!uniformTone) {
+            const int x = static_cast<int>(pixel % source.width);
+            const int y = static_cast<int>(pixel / source.width);
+            pixelHdr = source.hdr;
+            pixelWhite = source.sdrWhiteLevelNits;
+            for (auto region = source.toneRegions.rbegin(); region != source.toneRegions.rend(); ++region) {
+                if (ContainsPoint(region->pixels, x, y)) {
+                    pixelHdr = region->hdr;
+                    pixelWhite = region->sdrWhiteLevelNits;
+                    break;
+                }
+            }
+        }
+        const float whiteScale = SdrWhiteScale(pixelHdr, pixelWhite);
+        const float outputScale = pixelHdr ? hdrOutputScale : 1.0f;
+        const float compression = pixelHdr ? hdrCompression : 0.0f;
+        float red = std::max(0.0f, halfToFloat(source.rgba[input])) * whiteScale;
+        float green = std::max(0.0f, halfToFloat(source.rgba[input + 1])) * whiteScale;
+        float blue = std::max(0.0f, halfToFloat(source.rgba[input + 2])) * whiteScale;
+        const float luminance = 0.2126f * red + 0.7152f * green + 0.0722f * blue;
+        const float knee = 1.0f - 0.5f * compression;
+        if (compression > 0.0f && std::isfinite(luminance) && luminance > knee) {
+            const float shoulderRange = 1.0f - knee;
+            const float excess = luminance - knee;
+            const float mappedLuminance = knee + shoulderRange * excess / (excess + shoulderRange);
+            const float shoulderScale = mappedLuminance / luminance;
+            red *= shoulderScale;
+            green *= shoulderScale;
+            blue *= shoulderScale;
+        }
+        result.pixels[output] = encode(blue * outputScale);
+        result.pixels[output + 1] = encode(green * outputScale);
+        result.pixels[output + 2] = encode(red * outputScale);
         result.pixels[output + 3] = 255;
     }
     return result;

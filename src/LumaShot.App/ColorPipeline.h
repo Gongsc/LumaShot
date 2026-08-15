@@ -5,6 +5,12 @@
 
 namespace lumashot {
 
+struct ImageToneRegion {
+    RectI pixels;
+    bool hdr{};
+    float sdrWhiteLevelNits{80.0f};
+};
+
 struct ImageF16 {
     UINT width{};
     UINT height{};
@@ -12,6 +18,9 @@ struct ImageF16 {
     bool hdr{};
     float maxLuminanceNits{80.0f};
     float sdrWhiteLevelNits{80.0f};
+    // Regions are ordered like composition layers; the last matching region
+    // owns a pixel. This keeps per-display SDR white levels for mixed desktops.
+    std::vector<ImageToneRegion> toneRegions;
 };
 
 struct ImageBgra8 {

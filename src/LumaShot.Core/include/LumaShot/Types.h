@@ -94,15 +94,15 @@ struct HdrCalibration {
     static constexpr int MaximumOutputBrightness = 110;
     static constexpr int MinimumHighlightCompression = 0;
     static constexpr int MaximumHighlightCompression = 100;
-    static constexpr int DefaultOutputBrightness = 85;
-    static constexpr int DefaultHighlightCompression = 20;
+    static constexpr int DefaultOutputBrightness = 100;
+    static constexpr int DefaultHighlightCompression = 0;
 
     int outputBrightnessPercent{DefaultOutputBrightness};
     int highlightCompressionPercent{DefaultHighlightCompression};
 };
 
 struct AppSettings {
-    static constexpr int CurrentSchemaVersion = 2;
+    static constexpr int CurrentSchemaVersion = 3;
     int schemaVersion{CurrentSchemaVersion};
     Language language{Language::Automatic};
     HotkeyBinding hotkey;

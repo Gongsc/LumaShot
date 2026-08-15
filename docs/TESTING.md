@@ -9,7 +9,7 @@ Run from PowerShell:
 .\bin\Release\LumaShot.Tests.exe --capture-smoke
 ```
 
-The test executable covers negative-coordinate geometry and cropping, mixed SDR/HDR composition, half-float values above `1.0`, Direct2D/CPU SDR tone mapping, all annotation variants and undo/redo, English/Chinese resources, settings round trips and corrupt-file recovery, PNG encoding, lossless floating-point JPEG XR round trips, and the `CF_DIBV5`/`CF_DIB` payload structures. `--capture-smoke` performs a real Windows Graphics Capture session and validates the returned `R16G16B16A16_FLOAT` frame dimensions.
+The test executable covers negative-coordinate geometry and cropping, per-display SDR-white normalization on mixed SDR/HDR desktops, half-float values above `1.0`, Direct2D/CPU SDR conversion, hue-preserving highlight compression, all annotation variants and undo/redo, English/Chinese resources, settings migration and corrupt-file recovery, PNG encoding, lossless floating-point JPEG XR round trips, and the `CF_DIBV5`/`CF_DIB` payload structures. `--capture-smoke` performs a real Windows Graphics Capture session, validates the returned `R16G16B16A16_FLOAT` frames, and reports each display's HDR peak, SDR white level, and sampled content luminance.
 
 ## Windows 11 manual acceptance
 
@@ -20,7 +20,7 @@ Repeat the following on single-SDR, single-HDR, and mixed HDR/SDR desktops, incl
 - Draw pen, rectangle, arrow, and Chinese/English IME text annotations; cycle color and width; test undo and redo.
 - On an HDR selection, open HDR calibration from the capture toolbar, drag both sliders, reset them, and confirm that the overlay, PNG, and clipboard output match. Confirm that the control is disabled for an SDR-only selection.
 - Confirm the overlay and toolbar never appear in output, with and without cursor capture.
-- Save PNG and verify normal SDR appearance. Save JXR from an HDR display and verify highlights in Windows Photos; decode it and confirm a channel value above `1.0` where the source contains HDR highlights.
+- Save PNG and compare it with an Xbox Game Bar capture of the same HDR frame; verify similar SDR white, midtone contrast, saturation, and highlight clipping. Save JXR from an HDR display and verify highlights in Windows Photos; decode it and confirm a channel value above `1.0` where the source contains HDR highlights.
 - Paste into Paint, Office, and representative chat applications. Confirm PNG, `CF_DIBV5`, and `CF_DIB` consumers receive the SDR image.
 - Exercise clipboard contention, a read-only save target, a window closing during capture, display topology changes, and graphics-device reset/recovery.
 - Confirm protected or DRM content may be black and that the application does not attempt to bypass the operating-system policy.

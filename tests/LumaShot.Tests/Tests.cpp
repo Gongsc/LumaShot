@@ -9,6 +9,7 @@
 #include <LumaShot/SettingsStore.h>
 #include <wincodec.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <filesystem>
@@ -96,6 +97,18 @@ void SettingsTests(const std::filesystem::path& base) {
           migrated.hdrCalibration.highlightCompressionPercent == HdrCalibration::DefaultHighlightCompression,
           "migrates schema 1 settings with HDR calibration defaults");
     {
+        FILE* legacyCalibration{};
+        _wfopen_s(&legacyCalibration, path.c_str(), L"wb");
+        if (legacyCalibration) {
+            fputs("{\"schemaVersion\":2,\"hdrOutputBrightnessPercent\":40,\"hdrHighlightCompressionPercent\":80}", legacyCalibration);
+            fclose(legacyCalibration);
+        }
+    }
+    const auto recalibrated = store.load();
+    Check(recalibrated.hdrCalibration.outputBrightnessPercent == HdrCalibration::DefaultOutputBrightness &&
+          recalibrated.hdrCalibration.highlightCompressionPercent == HdrCalibration::DefaultHighlightCompression,
+          "resets schema 2 calibration after changing HDR tone-map semantics");
+    {
         FILE* corrupt{};
         _wfopen_s(&corrupt, path.c_str(), L"wb");
         if (corrupt) { fputs("{ definitely not valid json", corrupt); fclose(corrupt); }
@@ -137,23 +150,43 @@ void ColorTests() {
         ramp.rgba[offset + 3] = ColorPipeline::floatToHalf(1.0f);
     }
     const auto neutralRamp = ColorPipeline::toneMapToSdr(ramp, {100, 0});
-    Check(neutralRamp.pixels[4 * 4] > 220 && neutralRamp.pixels[6 * 4] >= 248,
-          "tone maps a 240-nit HDR desktop without applying SDR-white scaling twice");
+    Check(neutralRamp.pixels[2 * 4] > 115 && neutralRamp.pixels[2 * 4] < 120 &&
+          neutralRamp.pixels[4 * 4] >= 254 && neutralRamp.pixels[6 * 4] >= 254,
+          "undoes 240-nit Windows SDR boost before encoding an SDR screenshot");
     const auto calibratedRamp = ColorPipeline::toneMapToSdr(ramp, {60, 80});
     Check(calibratedRamp.pixels[4 * 4] < neutralRamp.pixels[4 * 4] &&
           calibratedRamp.pixels[6 * 4] < neutralRamp.pixels[6 * 4] &&
           calibratedRamp.pixels[6 * 4] > calibratedRamp.pixels[4 * 4],
           "applies HDR output brightness and highlight compression monotonically");
+    ImageF16 colorful;
+    colorful.width = colorful.height = 1; colorful.hdr = true; colorful.sdrWhiteLevelNits = 80.0f;
+    colorful.rgba = {ColorPipeline::floatToHalf(4.0f), ColorPipeline::floatToHalf(2.0f),
+                     ColorPipeline::floatToHalf(1.0f), ColorPipeline::floatToHalf(1.0f)};
+    const auto huePreserved = ColorPipeline::toneMapToSdr(colorful, {60, 100});
+    const auto decodeSrgb = [](std::uint8_t value) {
+        const float encoded = static_cast<float>(value) / 255.0f;
+        return encoded <= 0.04045f ? encoded / 12.92f : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
+    };
+    const float mappedRed = decodeSrgb(huePreserved.pixels[2]);
+    const float mappedGreen = decodeSrgb(huePreserved.pixels[1]);
+    const float mappedBlue = decodeSrgb(huePreserved.pixels[0]);
+    Check(std::abs(mappedRed / mappedGreen - 2.0f) < 0.03f &&
+          std::abs(mappedGreen / mappedBlue - 2.0f) < 0.03f,
+          "compresses HDR luminance without shifting highlight hue");
     const auto thumbnail = ColorPipeline::thumbnail(ramp, 4, 4);
     Check(thumbnail.width == 4 && thumbnail.height == 1 && thumbnail.hdr &&
           thumbnail.maxLuminanceNits == ramp.maxLuminanceNits,
           "creates a bounded HDR calibration preview without dropping metadata");
     CaptureFrameSet set; set.virtualDesktop = {-2, 0, 2, 1};
     MonitorFrame left; left.desktopRect = {-2, 0, 0, 1}; left.width = 2; left.height = 1; left.rgba16f.assign(8, ColorPipeline::floatToHalf(0.25f));
-    MonitorFrame right; right.desktopRect = {0, 0, 2, 1}; right.width = 2; right.height = 1; right.hdrEnabled = true; right.rgba16f.assign(8, ColorPipeline::floatToHalf(2.0f));
+    MonitorFrame right; right.desktopRect = {0, 0, 2, 1}; right.width = 2; right.height = 1; right.hdrEnabled = true;
+    right.sdrWhiteLevelNits = 240.0f; right.rgba16f.assign(8, ColorPipeline::floatToHalf(3.0f));
     set.monitors = {left, right};
     const auto composed = ColorPipeline::compose(set, {-1, 0, 1, 1});
     Check(composed.width == 2 && composed.hdr, "composes mixed HDR displays across negative origin");
+    const auto mixedToneMap = ColorPipeline::toneMapToSdr(composed, {100, 0});
+    Check(mixedToneMap.pixels[0] > 135 && mixedToneMap.pixels[0] < 140 && mixedToneMap.pixels[4] >= 254,
+          "normalizes each display's SDR white independently on a mixed desktop");
     CaptureFrameSet scaledSet; scaledSet.virtualDesktop = {100, 100, 104, 102};
     MonitorFrame scaled; scaled.desktopRect = scaledSet.virtualDesktop; scaled.width = 2; scaled.height = 1;
     scaled.rgba16f = {ColorPipeline::floatToHalf(0.25f), 0, 0, ColorPipeline::floatToHalf(1.0f),
@@ -224,14 +257,37 @@ int main(int argc, char** argv) {
             Check(!frames.monitors.empty(), "captures at least one monitor");
             for (const auto& frame : frames.monitors) {
                 Check(frame.width > 0 && frame.height > 0 && frame.rgba16f.size() == static_cast<std::size_t>(frame.width) * frame.height * 4, "captures an RGBA16F monitor frame");
+                std::vector<float> sampledLuminance;
+                sampledLuminance.reserve(static_cast<std::size_t>(frame.width) * frame.height / 16 + 1);
+                float maximumChannel{};
+                for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(frame.width) * frame.height; pixel += 16) {
+                    const auto offset = pixel * 4;
+                    const float red = ColorPipeline::halfToFloat(frame.rgba16f[offset]);
+                    const float green = ColorPipeline::halfToFloat(frame.rgba16f[offset + 1]);
+                    const float blue = ColorPipeline::halfToFloat(frame.rgba16f[offset + 2]);
+                    maximumChannel = std::max({maximumChannel, red, green, blue});
+                    sampledLuminance.push_back(0.2126f * red + 0.7152f * green + 0.0722f * blue);
+                }
+                std::sort(sampledLuminance.begin(), sampledLuminance.end());
+                const auto percentile = [&](double value) {
+                    const std::size_t index = std::min(sampledLuminance.size() - 1,
+                        static_cast<std::size_t>(value * static_cast<double>(sampledLuminance.size() - 1)));
+                    return sampledLuminance[index];
+                };
                 std::cout << "monitor texture=" << frame.width << 'x' << frame.height
                           << " desktop=" << frame.desktopRect.width() << 'x' << frame.desktopRect.height()
                           << " hdr=" << frame.hdrEnabled << " peak=" << frame.maxLuminanceNits
-                          << " white=" << frame.sdrWhiteLevelNits << '\n';
+                          << " white=" << frame.sdrWhiteLevelNits << " linear-p99=" << percentile(0.99)
+                          << " p9999=" << percentile(0.9999) << " max-channel=" << maximumChannel << '\n';
             }
             if (argc > 2 && !frames.monitors.empty()) {
                 const auto source = ColorPipeline::compose(frames, frames.monitors.front().desktopRect);
-                ImageExporter::savePng(std::filesystem::path(argv[2]), ColorPipeline::toneMapToSdr(source));
+                HdrCalibration calibration;
+                if (argc > 4) {
+                    calibration.outputBrightnessPercent = std::stoi(argv[3]);
+                    calibration.highlightCompressionPercent = std::stoi(argv[4]);
+                }
+                ImageExporter::savePng(std::filesystem::path(argv[2]), ColorPipeline::toneMapToSdr(source, calibration));
                 std::cout << "wrote tone-map diagnostic to " << argv[2] << '\n';
             }
         } catch (const std::exception& error) { ++failures; std::cerr << "CAPTURE: " << error.what() << '\n'; }

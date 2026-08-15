@@ -80,13 +80,18 @@ AppSettings SettingsStore::load() const noexcept {
         if (const auto value = StringValue(json, "lastCaptureMode")) result.lastCaptureMode = ParseCaptureMode(*value);
         if (const auto value = BoolValue(json, "includeCursor")) result.includeCursor = *value;
         if (const auto value = BoolValue(json, "launchAtLogin")) result.launchAtLogin = *value;
-        if (const auto value = UIntValue(json, "hdrOutputBrightnessPercent")) {
-            result.hdrCalibration.outputBrightnessPercent = std::clamp(static_cast<int>(*value),
-                HdrCalibration::MinimumOutputBrightness, HdrCalibration::MaximumOutputBrightness);
-        }
-        if (const auto value = UIntValue(json, "hdrHighlightCompressionPercent")) {
-            result.hdrCalibration.highlightCompressionPercent = std::clamp(static_cast<int>(*value),
-                HdrCalibration::MinimumHighlightCompression, HdrCalibration::MaximumHighlightCompression);
+        // Schema 3 changes calibration from a global Reinhard exposure control
+        // to an SDR-white-normalized highlight shoulder. Old values are not
+        // perceptually equivalent, so migrate them to the new neutral defaults.
+        if (*schema >= 3) {
+            if (const auto value = UIntValue(json, "hdrOutputBrightnessPercent")) {
+                result.hdrCalibration.outputBrightnessPercent = std::clamp(static_cast<int>(*value),
+                    HdrCalibration::MinimumOutputBrightness, HdrCalibration::MaximumOutputBrightness);
+            }
+            if (const auto value = UIntValue(json, "hdrHighlightCompressionPercent")) {
+                result.hdrCalibration.highlightCompressionPercent = std::clamp(static_cast<int>(*value),
+                    HdrCalibration::MinimumHighlightCompression, HdrCalibration::MaximumHighlightCompression);
+            }
         }
     } catch (...) {
         return AppSettings{};
