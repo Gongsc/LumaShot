@@ -11,6 +11,7 @@
 namespace lumashot {
 
 enum class OverlayAction;
+class SettingsWindow;
 
 class App {
 public:
@@ -34,6 +35,7 @@ private:
     SettingsStore settingsStore_;
     AppSettings settings_;
     Language language_{};
+    SettingsWindow* settingsWindow_{};
     std::atomic_bool capturing_{false};
     std::jthread captureThread_;
 

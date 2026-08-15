@@ -190,6 +190,11 @@ bool App::exportCapture(HWND owner, OverlayAction action, const CaptureFrameSet&
 }
 
 void App::showSettings() {
+    if (settingsWindow_) {
+        settingsWindow_->activate();
+        return;
+    }
+
     ImageF16 preview;
     try {
         POINT cursor{};
@@ -205,7 +210,15 @@ void App::showSettings() {
     } catch (...) {
     }
     SettingsWindow window(instance_, hwnd_, settings_, std::move(preview));
-    if (!window.run()) return;
+    settingsWindow_ = &window;
+    struct SettingsWindowGuard {
+        SettingsWindow*& slot;
+        ~SettingsWindowGuard() { slot = nullptr; }
+    } guard{settingsWindow_};
+
+    const bool accepted = window.run();
+    settingsWindow_ = nullptr;
+    if (!accepted) return;
     settings_ = window.settings(); language_ = ResolveLanguage(settings_.language);
     (void)settingsStore_.save(settings_); applyStartupSetting(); registerHotkey();
 }

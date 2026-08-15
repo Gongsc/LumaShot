@@ -7,6 +7,7 @@ class SettingsWindow {
 public:
     SettingsWindow(HINSTANCE instance, HWND owner, AppSettings settings, ImageF16 previewSource = {});
     [[nodiscard]] bool run();
+    void activate() const noexcept;
     [[nodiscard]] const AppSettings& settings() const noexcept { return settings_; }
 
 private:

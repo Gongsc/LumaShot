@@ -174,6 +174,15 @@ bool SettingsWindow::run() {
     return accepted_;
 }
 
+void SettingsWindow::activate() const noexcept {
+    if (!hwnd_ || !IsWindow(hwnd_)) return;
+    if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
+    ShowWindow(hwnd_, SW_SHOW);
+    BringWindowToTop(hwnd_);
+    SetActiveWindow(hwnd_);
+    SetForegroundWindow(hwnd_);
+}
+
 LRESULT CALLBACK SettingsWindow::WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     auto* self = reinterpret_cast<SettingsWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
