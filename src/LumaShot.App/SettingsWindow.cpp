@@ -5,9 +5,7 @@
 #include <array>
 #include <dwmapi.h>
 #include <string>
-#include <utility>
 #include <uxtheme.h>
-#include <windowsx.h>
 
 namespace lumashot {
 namespace {
@@ -18,9 +16,7 @@ constexpr int CursorCheckbox = 1003;
 constexpr int StartupCheckbox = 1004;
 constexpr int SaveButton = 1005;
 constexpr int CancelButton = 1006;
-constexpr int OutputBrightnessSlider = 1007;
-constexpr int HighlightCompressionSlider = 1008;
-constexpr int ResetCalibrationButton = 1009;
+constexpr int StartCalibrationButton = 1007;
 constexpr int LanguageLabel = 1101;
 constexpr int HotkeyLabel = 1102;
 
@@ -37,34 +33,6 @@ constexpr COLORREF DarkSecondaryText = RGB(190, 190, 190);
 constexpr COLORREF LightInput = RGB(255, 255, 255);
 constexpr COLORREF DarkInput = RGB(51, 51, 51);
 constexpr COLORREF Accent = RGB(0, 120, 212);
-
-ImageF16 MakeSyntheticPreview() {
-    ImageF16 image;
-    image.width = 480; image.height = 270; image.hdr = true;
-    image.maxLuminanceNits = 1000.0f; image.sdrWhiteLevelNits = 203.0f;
-    image.rgba.resize(static_cast<std::size_t>(image.width) * image.height * 4);
-    for (UINT y = 0; y < image.height; ++y) {
-        for (UINT x = 0; x < image.width; ++x) {
-            const float horizontal = static_cast<float>(x) / static_cast<float>(image.width - 1);
-            const float vertical = static_cast<float>(y) / static_cast<float>(image.height - 1);
-            float luminance = 0.015f + 7.5f * horizontal * horizontal;
-            float red = luminance * (0.72f + 0.28f * vertical);
-            float green = luminance * (0.82f + 0.18f * (1.0f - vertical));
-            float blue = luminance * (1.08f - 0.35f * vertical);
-            if (y > image.height * 3 / 4) {
-                constexpr float patches[]{0.03f, 0.18f, 0.6f, 1.0f, 2.5f, 6.0f, 12.5f};
-                const UINT patch = std::min<UINT>(6, x * 7 / image.width);
-                red = green = blue = patches[patch];
-            }
-            const auto offset = (static_cast<std::size_t>(y) * image.width + x) * 4;
-            image.rgba[offset] = ColorPipeline::floatToHalf(red);
-            image.rgba[offset + 1] = ColorPipeline::floatToHalf(green);
-            image.rgba[offset + 2] = ColorPipeline::floatToHalf(blue);
-            image.rgba[offset + 3] = ColorPipeline::floatToHalf(1.0f);
-        }
-    }
-    return image;
-}
 
 bool IsSystemDarkMode() {
     DWORD value = 1;
@@ -120,12 +88,9 @@ std::wstring HotkeyText(HWND control) {
 }
 } // namespace
 
-SettingsWindow::SettingsWindow(HINSTANCE instance, HWND owner, AppSettings settings, ImageF16 previewSource)
-    : instance_(instance), owner_(owner), settings_(settings), previewSource_(std::move(previewSource)),
-      displayLanguage_(ResolveLanguage(settings.language)) {
-    if (!previewSource_.hdr || previewSource_.width == 0 || previewSource_.height == 0) previewSource_ = MakeSyntheticPreview();
-    updateCalibrationPreview();
-}
+SettingsWindow::SettingsWindow(HINSTANCE instance, HWND owner, AppSettings settings)
+    : instance_(instance), owner_(owner), settings_(settings),
+      displayLanguage_(ResolveLanguage(settings.language)) {}
 
 bool SettingsWindow::run() {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_HOTKEY_CLASS | ICC_STANDARD_CLASSES};
@@ -143,7 +108,7 @@ bool SettingsWindow::run() {
     dpi_ = GetDpiForSystem();
     constexpr DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
     constexpr DWORD exStyle = WS_EX_DLGMODALFRAME;
-    RECT windowRect{0, 0, scale(720), scale(650)};
+    RECT windowRect{0, 0, scale(720), scale(500)};
     AdjustWindowRectExForDpi(&windowRect, style, FALSE, exStyle, dpi_);
     const int width = windowRect.right - windowRect.left;
     const int height = windowRect.bottom - windowRect.top;
@@ -269,82 +234,6 @@ LRESULT CALLBACK SettingsWindow::InputControlProc(HWND window, UINT message, WPA
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
-LRESULT CALLBACK SettingsWindow::CalibrationSliderProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
-                                                        UINT_PTR id, DWORD_PTR data) {
-    auto* self = reinterpret_cast<SettingsWindow*>(data);
-    const int controlId = static_cast<int>(id);
-    switch (message) {
-    case WM_MOUSEMOVE: {
-        if (self->hoveredSlider_ != controlId) {
-            const int previous = self->hoveredSlider_;
-            self->hoveredSlider_ = controlId;
-            if (previous >= 0) InvalidateRect(GetDlgItem(self->hwnd_, previous), nullptr, FALSE);
-            InvalidateRect(window, nullptr, FALSE);
-        }
-        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
-        TrackMouseEvent(&tracking);
-        if (self->draggingSlider_ == controlId && GetCapture() == window) {
-            self->setCalibrationFromPoint(window, controlId, GET_X_LPARAM(lparam));
-        }
-        return 0;
-    }
-    case WM_MOUSELEAVE:
-        if (self->hoveredSlider_ == controlId) {
-            self->hoveredSlider_ = -1;
-            InvalidateRect(window, nullptr, FALSE);
-        }
-        return 0;
-    case WM_LBUTTONDOWN:
-        SetFocus(window);
-        SetCapture(window);
-        self->draggingSlider_ = controlId;
-        self->setCalibrationFromPoint(window, controlId, GET_X_LPARAM(lparam));
-        return 0;
-    case WM_LBUTTONUP:
-        if (self->draggingSlider_ == controlId) {
-            self->setCalibrationFromPoint(window, controlId, GET_X_LPARAM(lparam));
-            self->draggingSlider_ = -1;
-            if (GetCapture() == window) ReleaseCapture();
-        }
-        return 0;
-    case WM_CAPTURECHANGED:
-        if (self->draggingSlider_ == controlId) self->draggingSlider_ = -1;
-        return 0;
-    case WM_KEYDOWN:
-        if (wparam == VK_LEFT || wparam == VK_DOWN) self->adjustCalibration(controlId, -1);
-        else if (wparam == VK_RIGHT || wparam == VK_UP) self->adjustCalibration(controlId, 1);
-        else if (wparam == VK_PRIOR) self->adjustCalibration(controlId, 5);
-        else if (wparam == VK_NEXT) self->adjustCalibration(controlId, -5);
-        else if (wparam == VK_HOME) self->adjustCalibration(controlId, -1000);
-        else if (wparam == VK_END) self->adjustCalibration(controlId, 1000);
-        else break;
-        return 0;
-    case WM_GETDLGCODE:
-        return DLGC_WANTARROWS;
-    case WM_SETCURSOR:
-        SetCursor(LoadCursorW(nullptr, IDC_HAND));
-        return TRUE;
-    case WM_SETFOCUS:
-    case WM_KILLFOCUS:
-        InvalidateRect(window, nullptr, FALSE);
-        return 0;
-    case WM_PAINT: {
-        PAINTSTRUCT ps{};
-        BeginPaint(window, &ps);
-        self->drawCalibrationSlider(window, controlId, ps.hdc);
-        EndPaint(window, &ps);
-        return 0;
-    }
-    case WM_PRINTCLIENT:
-        self->drawCalibrationSlider(window, controlId, reinterpret_cast<HDC>(wparam));
-        return 0;
-    case WM_NCDESTROY:
-        RemoveWindowSubclass(window, CalibrationSliderProc, id);
-        break;
-    }
-    return DefSubclassProc(window, message, wparam, lparam);
-}
-
 LRESULT SettingsWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_CREATE: {
@@ -353,7 +242,7 @@ LRESULT SettingsWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam
             dpi_ = windowDpi;
             RECT current{};
             GetWindowRect(hwnd_, &current);
-            RECT desired{0, 0, scale(720), scale(650)};
+            RECT desired{0, 0, scale(720), scale(500)};
             AdjustWindowRectExForDpi(&desired, static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE)), FALSE,
                                      static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE)), dpi_);
             const int width = desired.right - desired.left;
@@ -417,7 +306,7 @@ LRESULT SettingsWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam
             drawComboItem(*reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
             return TRUE;
         }
-        if (wparam == SaveButton || wparam == CancelButton || wparam == ResetCalibrationButton) {
+        if (wparam == SaveButton || wparam == CancelButton || wparam == StartCalibrationButton) {
             drawActionButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
             return TRUE;
         }
@@ -435,12 +324,12 @@ LRESULT SettingsWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam
             DestroyWindow(hwnd_);
             return 0;
         }
-        if (LOWORD(wparam) == ResetCalibrationButton) {
-            settings_.hdrCalibration = {};
-            updateCalibrationPreview();
-            InvalidateRect(GetDlgItem(hwnd_, OutputBrightnessSlider), nullptr, FALSE);
-            InvalidateRect(GetDlgItem(hwnd_, HighlightCompressionSlider), nullptr, FALSE);
-            InvalidateRect(hwnd_, nullptr, FALSE);
+        if (LOWORD(wparam) == StartCalibrationButton) {
+            readControls();
+            accepted_ = true;
+            calibrationRequested_ = true;
+            done_ = true;
+            DestroyWindow(hwnd_);
             return 0;
         }
         break;
@@ -487,13 +376,9 @@ void SettingsWindow::createControls() {
                                  StartupCheckbox, instance_);
     SendMessageW(startupBox, BM_SETCHECK, settings_.launchAtLogin ? BST_CHECKED : BST_UNCHECKED, 0);
 
-    HWND brightnessSlider = AddControl(hwnd_, 0, L"STATIC", L"", SS_NOTIFY | WS_TABSTOP,
-                                       OutputBrightnessSlider, instance_);
-    HWND compressionSlider = AddControl(hwnd_, 0, L"STATIC", L"", SS_NOTIFY | WS_TABSTOP,
-                                        HighlightCompressionSlider, instance_);
-    const auto reset = Localized(StringId::ResetCalibration, displayLanguage_);
-    HWND resetButton = AddControl(hwnd_, 0, L"BUTTON", reset.data(), BS_OWNERDRAW | WS_TABSTOP,
-                                  ResetCalibrationButton, instance_);
+    const auto startCalibration = Localized(StringId::StartCalibration, displayLanguage_);
+    HWND calibrationButton = AddControl(hwnd_, 0, L"BUTTON", startCalibration.data(),
+                                        BS_OWNERDRAW | WS_TABSTOP, StartCalibrationButton, instance_);
 
     const auto save = Localized(StringId::Save, displayLanguage_);
     const auto cancel = Localized(StringId::Cancel, displayLanguage_);
@@ -503,14 +388,11 @@ void SettingsWindow::createControls() {
                                    CancelButton, instance_);
     SetWindowSubclass(saveButton, ActionButtonProc, SaveButton, reinterpret_cast<DWORD_PTR>(this));
     SetWindowSubclass(cancelButton, ActionButtonProc, CancelButton, reinterpret_cast<DWORD_PTR>(this));
-    SetWindowSubclass(resetButton, ActionButtonProc, ResetCalibrationButton, reinterpret_cast<DWORD_PTR>(this));
+    SetWindowSubclass(calibrationButton, ActionButtonProc, StartCalibrationButton, reinterpret_cast<DWORD_PTR>(this));
     SetWindowSubclass(language, InputControlProc, LanguageCombo, reinterpret_cast<DWORD_PTR>(this));
     SetWindowSubclass(hotkey, InputControlProc, HotkeyControl, reinterpret_cast<DWORD_PTR>(this));
-    SetWindowSubclass(brightnessSlider, CalibrationSliderProc, OutputBrightnessSlider, reinterpret_cast<DWORD_PTR>(this));
-    SetWindowSubclass(compressionSlider, CalibrationSliderProc, HighlightCompressionSlider, reinterpret_cast<DWORD_PTR>(this));
-
-    for (HWND control : {languageText, language, hotkeyText, hotkey, cursorBox, startupBox, brightnessSlider,
-                         compressionSlider, resetButton, saveButton, cancelButton}) {
+    for (HWND control : {languageText, language, hotkeyText, hotkey, cursorBox, startupBox,
+                         calibrationButton, saveButton, cancelButton}) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
         SetWindowTheme(control, dark_ ? L"DarkMode_Explorer" : L"Explorer", nullptr);
     }
@@ -530,12 +412,8 @@ void SettingsWindow::layoutControls() {
     MoveWindow(GetDlgItem(hwnd_, HotkeyControl), inputX, scale(169), inputWidth, scale(34), TRUE);
     MoveWindow(GetDlgItem(hwnd_, CursorCheckbox), scale(44), scale(271), client.right - scale(88), scale(25), TRUE);
     MoveWindow(GetDlgItem(hwnd_, StartupCheckbox), scale(44), scale(297), client.right - scale(88), scale(25), TRUE);
-
-    const int calibrationX = scale(400);
-    const int calibrationWidth = std::max(scale(180), static_cast<int>(client.right) - calibrationX - scale(44));
-    MoveWindow(GetDlgItem(hwnd_, OutputBrightnessSlider), calibrationX, scale(414), calibrationWidth, scale(28), TRUE);
-    MoveWindow(GetDlgItem(hwnd_, HighlightCompressionSlider), calibrationX, scale(478), calibrationWidth, scale(28), TRUE);
-    MoveWindow(GetDlgItem(hwnd_, ResetCalibrationButton), calibrationX, scale(520), scale(112), scale(32), TRUE);
+    MoveWindow(GetDlgItem(hwnd_, StartCalibrationButton), client.right - scale(184), scale(359),
+               scale(140), scale(38), TRUE);
 
     constexpr int actionWidth = 96;
     constexpr int actionGap = 10;
@@ -562,7 +440,7 @@ void SettingsWindow::paint() {
                     scale(12), card, border);
     FillRoundedRect(dc, {scale(24), scale(230), client.right - scale(24), scale(322)},
                     scale(12), card, border);
-    FillRoundedRect(dc, {scale(24), scale(334), client.right - scale(24), scale(568)},
+    FillRoundedRect(dc, {scale(24), scale(334), client.right - scale(24), scale(414)},
                     scale(12), card, border);
 
     SetBkMode(dc, TRANSPARENT);
@@ -590,39 +468,15 @@ void SettingsWindow::paint() {
     const auto behaviorText = Localized(StringId::Behavior, displayLanguage_);
     DrawTextW(dc, behaviorText.data(), static_cast<int>(behaviorText.size()), &behaviorCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    RECT calibrationCaption{scale(44), scale(346), scale(180), scale(369)};
+    RECT calibrationCaption{scale(44), scale(346), client.right - scale(204), scale(369)};
     const auto calibrationText = Localized(StringId::HdrCalibrationTitle, displayLanguage_);
     DrawTextW(dc, calibrationText.data(), static_cast<int>(calibrationText.size()), &calibrationCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(dc, bodyFont_);
-    RECT calibrationHint{scale(160), scale(346), client.right - scale(44), scale(369)};
+    RECT calibrationHint{scale(44), scale(371), client.right - scale(204), scale(400)};
     const auto hintText = Localized(StringId::HdrCalibrationHint, displayLanguage_);
     DrawTextW(dc, hintText.data(), static_cast<int>(hintText.size()), &calibrationHint,
-              DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-
-    SelectObject(dc, captionFont_);
-    RECT previewLabel{scale(44), scale(369), scale(370), scale(389)};
-    const auto previewText = Localized(StringId::LivePreview, displayLanguage_);
-    DrawTextW(dc, previewText.data(), static_cast<int>(previewText.size()), &previewLabel,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    drawCalibrationPreview(dc, {scale(44), scale(389), scale(370), scale(548)});
-
-    SelectObject(dc, bodyFont_);
-    SetTextColor(dc, dark_ ? DarkText : LightText);
-    RECT brightnessLabel{scale(400), scale(379), client.right - scale(44), scale(410)};
-    const auto brightnessText = Localized(StringId::HdrOutputBrightness, displayLanguage_);
-    DrawTextW(dc, brightnessText.data(), static_cast<int>(brightnessText.size()), &brightnessLabel,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    wchar_t brightnessValue[24]{};
-    swprintf_s(brightnessValue, L"%d%%", settings_.hdrCalibration.outputBrightnessPercent);
-    DrawTextW(dc, brightnessValue, -1, &brightnessLabel, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    RECT compressionLabel{scale(400), scale(443), client.right - scale(44), scale(474)};
-    const auto compressionText = Localized(StringId::HdrHighlightCompression, displayLanguage_);
-    DrawTextW(dc, compressionText.data(), static_cast<int>(compressionText.size()), &compressionLabel,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    wchar_t compressionValue[24]{};
-    swprintf_s(compressionValue, L"%d%%", settings_.hdrCalibration.highlightCompressionPercent);
-    DrawTextW(dc, compressionValue, -1, &compressionLabel, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+              DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
     SelectObject(dc, oldFont);
 
     BitBlt(windowDc, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
@@ -634,13 +488,13 @@ void SettingsWindow::paint() {
 
 void SettingsWindow::drawActionButton(const DRAWITEMSTRUCT& item) {
     RECT rect = item.rcItem;
-    const bool save = item.CtlID == SaveButton;
+    const bool primary = item.CtlID == SaveButton || item.CtlID == StartCalibrationButton;
     const bool hovered = hoveredAction_ == static_cast<int>(item.CtlID);
     const bool pressed = (item.itemState & ODS_SELECTED) != 0;
     COLORREF fill{};
     COLORREF outline{};
     COLORREF text{};
-    if (save) {
+    if (primary) {
         fill = pressed ? RGB(0, 82, 148) : hovered ? RGB(16, 110, 190) : Accent;
         outline = fill;
         text = RGB(255, 255, 255);
@@ -734,138 +588,6 @@ void SettingsWindow::drawInputControl(HWND control, int id, HDC target) {
     if (ownsDc) ReleaseDC(control, dc);
 }
 
-int SettingsWindow::calibrationValue(int id) const noexcept {
-    return id == OutputBrightnessSlider ? settings_.hdrCalibration.outputBrightnessPercent
-                                        : settings_.hdrCalibration.highlightCompressionPercent;
-}
-
-void SettingsWindow::drawCalibrationSlider(HWND control, int id, HDC target) {
-    HDC dc = target ? target : GetDC(control);
-    if (!dc) return;
-    RECT client{};
-    GetClientRect(control, &client);
-    FillRect(dc, &client, cardBrush_);
-
-    const int minimum = id == OutputBrightnessSlider ? HdrCalibration::MinimumOutputBrightness
-                                                      : HdrCalibration::MinimumHighlightCompression;
-    const int maximum = id == OutputBrightnessSlider ? HdrCalibration::MaximumOutputBrightness
-                                                      : HdrCalibration::MaximumHighlightCompression;
-    const int start = scale(10);
-    const int end = std::max<int>(start + 1, client.right - scale(10));
-    const int centerY = client.bottom / 2;
-    const int thumbX = start + MulDiv(calibrationValue(id) - minimum, end - start, maximum - minimum);
-    const COLORREF inactive = dark_ ? RGB(86, 86, 86) : RGB(190, 190, 190);
-    FillRoundedRect(dc, {start, centerY - scale(2), end, centerY + scale(2)}, scale(4), inactive, inactive);
-    FillRoundedRect(dc, {start, centerY - scale(2), thumbX, centerY + scale(2)}, scale(4), Accent, Accent);
-
-    const bool active = hoveredSlider_ == id || draggingSlider_ == id || GetFocus() == control;
-    const int radius = scale(active ? 8 : 7);
-    HBRUSH thumb = CreateSolidBrush(active ? RGB(16, 110, 190) : Accent);
-    HPEN thumbPen = CreatePen(PS_SOLID, std::max(1, scale(1)), dark_ ? DarkCard : LightCard);
-    const auto oldBrush = SelectObject(dc, thumb);
-    const auto oldPen = SelectObject(dc, thumbPen);
-    Ellipse(dc, thumbX - radius, centerY - radius, thumbX + radius, centerY + radius);
-    SelectObject(dc, oldPen);
-    SelectObject(dc, oldBrush);
-    DeleteObject(thumbPen);
-    DeleteObject(thumb);
-    if (GetFocus() == control) {
-        HPEN focusPen = CreatePen(PS_DOT, 1, Accent);
-        const auto previousPen = SelectObject(dc, focusPen);
-        const auto previousBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-        Ellipse(dc, thumbX - radius - scale(3), centerY - radius - scale(3),
-                thumbX + radius + scale(3), centerY + radius + scale(3));
-        SelectObject(dc, previousBrush);
-        SelectObject(dc, previousPen);
-        DeleteObject(focusPen);
-    }
-    if (!target) ReleaseDC(control, dc);
-}
-
-void SettingsWindow::setCalibrationFromPoint(HWND control, int id, int x) {
-    RECT client{};
-    GetClientRect(control, &client);
-    const int start = scale(10);
-    const int end = std::max<int>(start + 1, client.right - scale(10));
-    const int minimum = id == OutputBrightnessSlider ? HdrCalibration::MinimumOutputBrightness
-                                                      : HdrCalibration::MinimumHighlightCompression;
-    const int maximum = id == OutputBrightnessSlider ? HdrCalibration::MaximumOutputBrightness
-                                                      : HdrCalibration::MaximumHighlightCompression;
-    const int position = std::clamp(x, start, end);
-    const int value = minimum + MulDiv(position - start, maximum - minimum, end - start);
-    const int previous = calibrationValue(id);
-    if (value == previous) return;
-    if (id == OutputBrightnessSlider) settings_.hdrCalibration.outputBrightnessPercent = value;
-    else settings_.hdrCalibration.highlightCompressionPercent = value;
-    updateCalibrationPreview();
-    InvalidateRect(control, nullptr, FALSE);
-    InvalidateRect(hwnd_, nullptr, FALSE);
-}
-
-void SettingsWindow::adjustCalibration(int id, int delta) {
-    const int minimum = id == OutputBrightnessSlider ? HdrCalibration::MinimumOutputBrightness
-                                                      : HdrCalibration::MinimumHighlightCompression;
-    const int maximum = id == OutputBrightnessSlider ? HdrCalibration::MaximumOutputBrightness
-                                                      : HdrCalibration::MaximumHighlightCompression;
-    const int value = std::clamp(calibrationValue(id) + delta, minimum, maximum);
-    if (value == calibrationValue(id)) return;
-    if (id == OutputBrightnessSlider) settings_.hdrCalibration.outputBrightnessPercent = value;
-    else settings_.hdrCalibration.highlightCompressionPercent = value;
-    updateCalibrationPreview();
-    InvalidateRect(GetDlgItem(hwnd_, id), nullptr, FALSE);
-    InvalidateRect(hwnd_, nullptr, FALSE);
-}
-
-void SettingsWindow::updateCalibrationPreview() {
-    try { calibrationPreview_ = ColorPipeline::toneMapToSdr(previewSource_, settings_.hdrCalibration); }
-    catch (...) { calibrationPreview_ = {}; }
-}
-
-void SettingsWindow::drawCalibrationPreview(HDC dc, const RECT& bounds) {
-    FillRoundedRect(dc, bounds, scale(9), RGB(12, 12, 12), dark_ ? RGB(76, 76, 76) : RGB(205, 205, 205));
-    if (calibrationPreview_.width == 0 || calibrationPreview_.height == 0 || calibrationPreview_.pixels.empty()) return;
-    RECT destination = bounds;
-    InflateRect(&destination, -scale(2), -scale(2));
-    const double sourceAspect = static_cast<double>(calibrationPreview_.width) / calibrationPreview_.height;
-    const double targetAspect = static_cast<double>(destination.right - destination.left) /
-                                std::max<LONG>(1, destination.bottom - destination.top);
-    if (sourceAspect > targetAspect) {
-        const int height = std::max(1, static_cast<int>((destination.right - destination.left) / sourceAspect));
-        const int top = (destination.top + destination.bottom - height) / 2;
-        destination.top = top; destination.bottom = top + height;
-    } else {
-        const int width = std::max(1, static_cast<int>((destination.bottom - destination.top) * sourceAspect));
-        const int left = (destination.left + destination.right - width) / 2;
-        destination.left = left; destination.right = left + width;
-    }
-
-    HRGN clip = CreateRoundRectRgn(bounds.left + scale(1), bounds.top + scale(1),
-                                   bounds.right - scale(1), bounds.bottom - scale(1), scale(9), scale(9));
-    SelectClipRgn(dc, clip);
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = static_cast<LONG>(calibrationPreview_.width);
-    info.bmiHeader.biHeight = -static_cast<LONG>(calibrationPreview_.height);
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    SetStretchBltMode(dc, HALFTONE);
-    SetBrushOrgEx(dc, 0, 0, nullptr);
-    StretchDIBits(dc, destination.left, destination.top, destination.right - destination.left,
-                  destination.bottom - destination.top, 0, 0, calibrationPreview_.width,
-                  calibrationPreview_.height, calibrationPreview_.pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
-    SelectClipRgn(dc, nullptr);
-    DeleteObject(clip);
-
-    HPEN borderPen = CreatePen(PS_SOLID, 1, dark_ ? RGB(76, 76, 76) : RGB(205, 205, 205));
-    const auto oldPen = SelectObject(dc, borderPen);
-    const auto oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    RoundRect(dc, bounds.left, bounds.top, bounds.right, bounds.bottom, scale(9), scale(9));
-    SelectObject(dc, oldBrush);
-    SelectObject(dc, oldPen);
-    DeleteObject(borderPen);
-}
-
 void SettingsWindow::refreshTheme() {
     dark_ = IsSystemDarkMode();
     createUiResources();
@@ -876,7 +598,6 @@ void SettingsWindow::refreshTheme() {
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
     const DWM_SYSTEMBACKDROP_TYPE backdrop = DWMSBT_MAINWINDOW;
     DwmSetWindowAttribute(hwnd_, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
-
     EnumChildWindows(hwnd_, [](HWND child, LPARAM data) -> BOOL {
         const bool darkMode = data != 0;
         SetWindowTheme(child, darkMode ? L"DarkMode_Explorer" : L"Explorer", nullptr);

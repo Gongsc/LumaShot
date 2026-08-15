@@ -22,7 +22,12 @@ public:
     static constexpr UINT ActivateMessage = WM_APP + 72;
 
 private:
-    struct CapturePayload { std::unique_ptr<CaptureFrameSet> frames; std::wstring error; };
+    struct CapturePayload {
+        std::unique_ptr<CaptureFrameSet> frames;
+        std::wstring error;
+        CaptureMode mode{CaptureMode::Region};
+        bool calibration{};
+    };
     static constexpr UINT TrayMessage = WM_APP + 1;
     static constexpr UINT CaptureReadyMessage = WM_APP + 2;
     static constexpr UINT_PTR TrayId = 1;
@@ -47,6 +52,8 @@ private:
     void notify(StringId title, StringId body, DWORD flags = NIIF_INFO) noexcept;
     void registerHotkey();
     void beginCapture(CaptureMode mode);
+    void beginCapture(CaptureMode mode, bool calibration);
+    void beginCalibration();
     void finishCapture(std::unique_ptr<CapturePayload> payload);
     void showSettings();
     void applyStartupSetting() noexcept;

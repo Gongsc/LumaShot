@@ -1,6 +1,7 @@
 #include "ColorPipeline.h"
 #include <LumaShot/Geometry.h>
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -9,6 +10,7 @@
 #include <d2d1effects.h>
 #include <d2d1effects_2.h>
 #include <dxgi1_2.h>
+#include <thread>
 #include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;
@@ -29,6 +31,26 @@ float SdrWhiteScale(bool hdr, float sdrWhiteLevelNits) noexcept {
     if (!hdr || !std::isfinite(sdrWhiteLevelNits)) return 1.0f;
     return D2D1_SCENE_REFERRED_SDR_WHITE_LEVEL /
            std::max(D2D1_SCENE_REFERRED_SDR_WHITE_LEVEL, sdrWhiteLevelNits);
+}
+
+const std::array<std::uint8_t, 65536>& Srgb8Table() {
+    static const auto table = [] {
+        std::array<std::uint8_t, 65536> result{};
+        for (std::size_t index = 0; index < result.size(); ++index) {
+            const float linear = static_cast<float>(index) / static_cast<float>(result.size() - 1);
+            const float srgb = linear <= 0.0031308f ? linear * 12.92f
+                                                    : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+            result[index] = static_cast<std::uint8_t>(std::lround(std::clamp(srgb, 0.0f, 1.0f) * 255.0f));
+        }
+        return result;
+    }();
+    return table;
+}
+
+std::uint8_t EncodeSrgb8(float linear) noexcept {
+    const float clamped = std::clamp(linear, 0.0f, 1.0f);
+    const auto index = static_cast<std::size_t>(clamped * 65535.0f + 0.5f);
+    return Srgb8Table()[std::min<std::size_t>(index, 65535)];
 }
 
 bool TryDirect2DEncode(const ImageF16& source, float linearScale, ImageBgra8& result) noexcept {
@@ -275,50 +297,73 @@ ImageBgra8 ColorPipeline::toneMapToSdr(const ImageF16& source, HdrCalibration ca
         TryDirect2DEncode(source, SdrWhiteScale(uniformHdr, uniformWhite) * uniformOutputScale, direct2d)) return direct2d;
     ImageBgra8 result{source.width, source.height};
     result.pixels.resize(static_cast<std::size_t>(source.width) * source.height * 4);
-    auto encode = [](float linear) {
-        linear = std::clamp(linear, 0.0f, 1.0f);
-        const float srgb = linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
-        return static_cast<std::uint8_t>(std::lround(std::clamp(srgb, 0.0f, 1.0f) * 255.0f));
+    struct ToneParameters {
+        float whiteScale{1.0f};
+        float outputScale{1.0f};
+        float compression{};
     };
-    for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(source.width) * source.height; ++pixel) {
-        const auto input = pixel * 4;
-        const auto output = pixel * 4;
-        bool pixelHdr = uniformHdr;
-        float pixelWhite = uniformWhite;
-        if (!uniformTone) {
-            const int x = static_cast<int>(pixel % source.width);
-            const int y = static_cast<int>(pixel / source.width);
-            pixelHdr = source.hdr;
-            pixelWhite = source.sdrWhiteLevelNits;
-            for (auto region = source.toneRegions.rbegin(); region != source.toneRegions.rend(); ++region) {
-                if (ContainsPoint(region->pixels, x, y)) {
-                    pixelHdr = region->hdr;
-                    pixelWhite = region->sdrWhiteLevelNits;
-                    break;
+    const auto makeParameters = [&](bool hdr, float white) {
+        return ToneParameters{SdrWhiteScale(hdr, white), hdr ? hdrOutputScale : 1.0f,
+                              hdr ? hdrCompression : 0.0f};
+    };
+    const ToneParameters uniformParameters = makeParameters(uniformHdr, uniformWhite);
+    const ToneParameters defaultParameters = makeParameters(source.hdr, source.sdrWhiteLevelNits);
+    std::vector<ToneParameters> regionParameters;
+    regionParameters.reserve(source.toneRegions.size());
+    for (const auto& region : source.toneRegions)
+        regionParameters.push_back(makeParameters(region.hdr, region.sdrWhiteLevelNits));
+
+    const auto processRows = [&](UINT firstRow, UINT lastRow) {
+        for (UINT y = firstRow; y < lastRow; ++y) {
+            for (UINT x = 0; x < source.width; ++x) {
+                const std::size_t pixel = static_cast<std::size_t>(y) * source.width + x;
+                const auto input = pixel * 4;
+                const auto output = pixel * 4;
+                ToneParameters parameters = uniformTone ? uniformParameters : defaultParameters;
+                if (!uniformTone) {
+                    for (std::size_t regionIndex = source.toneRegions.size(); regionIndex > 0; --regionIndex) {
+                        if (ContainsPoint(source.toneRegions[regionIndex - 1].pixels,
+                                          static_cast<int>(x), static_cast<int>(y))) {
+                            parameters = regionParameters[regionIndex - 1];
+                            break;
+                        }
+                    }
                 }
+                float red = std::max(0.0f, halfToFloat(source.rgba[input])) * parameters.whiteScale;
+                float green = std::max(0.0f, halfToFloat(source.rgba[input + 1])) * parameters.whiteScale;
+                float blue = std::max(0.0f, halfToFloat(source.rgba[input + 2])) * parameters.whiteScale;
+                const float luminance = 0.2126f * red + 0.7152f * green + 0.0722f * blue;
+                const float knee = 1.0f - 0.5f * parameters.compression;
+                if (parameters.compression > 0.0f && std::isfinite(luminance) && luminance > knee) {
+                    const float shoulderRange = 1.0f - knee;
+                    const float excess = luminance - knee;
+                    const float mappedLuminance = knee + shoulderRange * excess / (excess + shoulderRange);
+                    const float shoulderScale = mappedLuminance / luminance;
+                    red *= shoulderScale;
+                    green *= shoulderScale;
+                    blue *= shoulderScale;
+                }
+                result.pixels[output] = EncodeSrgb8(blue * parameters.outputScale);
+                result.pixels[output + 1] = EncodeSrgb8(green * parameters.outputScale);
+                result.pixels[output + 2] = EncodeSrgb8(red * parameters.outputScale);
+                result.pixels[output + 3] = 255;
             }
         }
-        const float whiteScale = SdrWhiteScale(pixelHdr, pixelWhite);
-        const float outputScale = pixelHdr ? hdrOutputScale : 1.0f;
-        const float compression = pixelHdr ? hdrCompression : 0.0f;
-        float red = std::max(0.0f, halfToFloat(source.rgba[input])) * whiteScale;
-        float green = std::max(0.0f, halfToFloat(source.rgba[input + 1])) * whiteScale;
-        float blue = std::max(0.0f, halfToFloat(source.rgba[input + 2])) * whiteScale;
-        const float luminance = 0.2126f * red + 0.7152f * green + 0.0722f * blue;
-        const float knee = 1.0f - 0.5f * compression;
-        if (compression > 0.0f && std::isfinite(luminance) && luminance > knee) {
-            const float shoulderRange = 1.0f - knee;
-            const float excess = luminance - knee;
-            const float mappedLuminance = knee + shoulderRange * excess / (excess + shoulderRange);
-            const float shoulderScale = mappedLuminance / luminance;
-            red *= shoulderScale;
-            green *= shoulderScale;
-            blue *= shoulderScale;
+    };
+    const std::size_t pixelCount = static_cast<std::size_t>(source.width) * source.height;
+    const UINT hardwareThreads = std::max(1u, std::thread::hardware_concurrency());
+    const UINT workerCount = pixelCount >= 1024u * 1024u
+        ? std::min({8u, hardwareThreads, std::max(1u, source.height)}) : 1u;
+    if (workerCount == 1) {
+        processRows(0, source.height);
+    } else {
+        std::vector<std::jthread> workers;
+        workers.reserve(workerCount);
+        for (UINT worker = 0; worker < workerCount; ++worker) {
+            const UINT firstRow = source.height * worker / workerCount;
+            const UINT lastRow = source.height * (worker + 1) / workerCount;
+            workers.emplace_back(processRows, firstRow, lastRow);
         }
-        result.pixels[output] = encode(blue * outputScale);
-        result.pixels[output + 1] = encode(green * outputScale);
-        result.pixels[output + 2] = encode(red * outputScale);
-        result.pixels[output + 3] = 255;
     }
     return result;
 }

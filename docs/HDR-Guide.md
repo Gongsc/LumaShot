@@ -4,7 +4,7 @@
 
 LumaShot 在内部始终使用 `R16G16B16A16_FLOAT` 线性 scRGB。截图涉及已开启 HDR 的显示器时，“保存”对话框默认选择 JPEG XR（`.jxr`）；该格式保留浮点像素以及超过 SDR 白点的高光。Windows Photos 可用于查看 HDR JXR，显示器需在 Windows“系统 > 显示 > HDR”中开启 HDR。
 
-截图工具栏中的“HDR 校准”和“设置 > HDR 校准”均提供输出亮度与高光压缩控制。截图界面会直接实时更新当前捕获内容，设置页则优先使用当前 HDR 屏幕的缩略图预览。转换会先撤销 Windows HDR 桌面对 SDR 内容施加的白点增益，再仅压缩超过 SDR 白点的 HDR 高光，从而保留中间调、对比度与色相。调整仅作用于 SDR 截图预览、PNG 和剪贴板；JPEG XR 始终保存未经校准压缩的原始浮点 HDR 数据。默认值为 100% 输出亮度和 0% 高光压缩，可随时恢复默认。
+在“设置 > HDR 校准”中点击“开始校准”后，LumaShot 会捕获当前桌面并进入专用全屏校准界面。校准画面使用虚拟桌面的原生物理像素，不会先缩小再拉伸。可拖动半透明浮动面板的位置，并调整输出亮度与高光压缩；全屏画面会实时显示转换结果。点击“应用”才会保存参数，点击“取消”或按 `Esc` 会保留进入校准前的设置。转换会先撤销 Windows HDR 桌面对 SDR 内容施加的白点增益，再仅压缩超过 SDR 白点的 HDR 高光，从而保留中间调、对比度与色相。调整仅作用于 SDR 截图预览、PNG 和剪贴板；JPEG XR 始终保存未经校准压缩的原始浮点 HDR 数据。默认值为 100% 输出亮度和 0% 高光压缩，可随时恢复默认。
 
 PNG 和剪贴板输出始终是 SDR。程序按显示器归一化 Windows SDR 白点，并通过保色相高光肩部曲线和色彩管理转换为 8 位 sRGB，因此可以粘贴到画图、Office 和常见聊天软件。此行为不会改变仍在内存中的 HDR 原图；保存失败时可直接重试或改选另一格式。
 
@@ -16,7 +16,7 @@ PNG 和剪贴板输出始终是 SDR。程序按显示器归一化 Windows SDR �
 
 LumaShot keeps captured content in linear `R16G16B16A16_FLOAT` scRGB. When a selection touches an HDR-enabled display, Save defaults to JPEG XR (`.jxr`), preserving floating-point samples and highlights above SDR white. Windows Photos can display HDR JXR when HDR is enabled under Windows Settings > System > Display > HDR.
 
-HDR calibration is available from both the capture toolbar and Settings. The capture overlay updates the captured content directly as the sliders move, while Settings uses a live thumbnail of the current HDR display when available. Conversion first reverses the Windows HDR desktop's white-level boost for SDR content, then compresses only highlights above SDR white so midtones, contrast, and hue remain intact. Calibration affects SDR capture preview, PNG, and clipboard output only; JPEG XR always keeps the original floating-point HDR pixels. Defaults are 100% output brightness and 0% highlight compression.
+Select Start calibration under Settings > HDR calibration to capture the current desktop and enter the dedicated full-screen calibration view. The calibration image uses the virtual desktop's native physical pixels instead of a downscaled thumbnail. Its translucent floating panel can be repositioned, and changes to output brightness and highlight compression update the full-screen image immediately. Apply saves the values; Cancel or `Esc` preserves the settings from before calibration. Conversion first reverses the Windows HDR desktop's white-level boost for SDR content, then compresses only highlights above SDR white so midtones, contrast, and hue remain intact. Calibration affects SDR capture preview, PNG, and clipboard output only; JPEG XR always keeps the original floating-point HDR pixels. Defaults are 100% output brightness and 0% highlight compression.
 
 PNG and clipboard output are always SDR. Per-display Windows SDR-white normalization, a hue-preserving highlight shoulder, and color management convert the image to 8-bit sRGB for compatibility with Paint, Office, and common messaging apps. The in-memory HDR capture is retained when export fails, so saving can be retried or switched to another format.
 

@@ -1,6 +1,7 @@
 #include "App.h"
 #include "AnnotationRenderer.h"
 #include "CaptureService.h"
+#include "CalibrationWindow.h"
 #include "ClipboardService.h"
 #include "ColorPipeline.h"
 #include "ImageExporter.h"
@@ -9,8 +10,6 @@
 #include "SettingsWindow.h"
 #include "resource.h"
 #include <LumaShot/Localization.h>
-#include <algorithm>
-#include <chrono>
 #include <shellapi.h>
 #include <filesystem>
 #include <utility>
@@ -128,14 +127,27 @@ void App::registerHotkey() {
 }
 
 void App::beginCapture(CaptureMode mode) {
+    beginCapture(mode, false);
+}
+
+void App::beginCalibration() {
+    beginCapture(CaptureMode::VirtualDesktop, true);
+}
+
+void App::beginCapture(CaptureMode mode, bool calibration) {
     if (capturing_.exchange(true)) return;
-    settings_.lastCaptureMode = mode; (void)settingsStore_.save(settings_);
-    const bool includeCursor = settings_.includeCursor;
+    if (!calibration) {
+        settings_.lastCaptureMode = mode;
+        (void)settingsStore_.save(settings_);
+    }
+    const bool includeCursor = calibration ? false : settings_.includeCursor;
     if (captureThread_.joinable()) captureThread_.join();
     const HWND target = hwnd_;
-    captureThread_ = std::jthread([target, includeCursor](std::stop_token stop) {
+    captureThread_ = std::jthread([target, includeCursor, mode, calibration](std::stop_token stop) {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         auto payload = std::make_unique<CapturePayload>();
+        payload->mode = mode;
+        payload->calibration = calibration;
         try {
             if (stop.stop_requested()) return;
             for (int attempt = 0; attempt < 2 && !payload->frames; ++attempt) {
@@ -155,9 +167,29 @@ void App::beginCapture(CaptureMode mode) {
 }
 
 void App::finishCapture(std::unique_ptr<CapturePayload> payload) {
+    if (!payload || !payload->frames) {
+        capturing_ = false;
+        notify(StringId::AppName, CaptureService::IsSupported() ? StringId::CaptureFailed : StringId::Unsupported, NIIF_ERROR);
+        return;
+    }
+    if (payload->calibration) {
+        struct CalibrationGuard {
+            std::atomic_bool& capturing;
+            ~CalibrationGuard() { capturing = false; }
+        } guard{capturing_};
+        if (!payload->frames->containsHdr(payload->frames->virtualDesktop)) {
+            notify(StringId::AppName, StringId::HdrCalibrationUnavailable, NIIF_WARNING);
+            return;
+        }
+        CalibrationWindow calibration(instance_, std::move(*payload->frames), language_, settings_.hdrCalibration);
+        if (calibration.run()) {
+            settings_.hdrCalibration = calibration.calibration();
+            (void)settingsStore_.save(settings_);
+        }
+        return;
+    }
     capturing_ = false;
-    if (!payload || !payload->frames) { notify(StringId::AppName, CaptureService::IsSupported() ? StringId::CaptureFailed : StringId::Unsupported, NIIF_ERROR); return; }
-    OverlayWindow overlay(instance_, std::move(*payload->frames), settings_.lastCaptureMode, language_,
+    OverlayWindow overlay(instance_, std::move(*payload->frames), payload->mode, language_,
                           settings_.includeCursor, settings_.hdrCalibration);
     overlay.run([this](HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection,
                        const AnnotationDocument& annotations, HdrCalibration calibration) {
@@ -195,21 +227,7 @@ void App::showSettings() {
         return;
     }
 
-    ImageF16 preview;
-    try {
-        POINT cursor{};
-        GetCursorPos(&cursor);
-        const HMONITOR target = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
-        CaptureService service;
-        const auto frames = service.captureDesktop(false, std::chrono::milliseconds(1800));
-        const auto found = std::find_if(frames.monitors.begin(), frames.monitors.end(),
-                                        [target](const MonitorFrame& frame) { return frame.monitor == target; });
-        if (found != frames.monitors.end() && found->hdrEnabled) {
-            preview = ColorPipeline::thumbnail(ColorPipeline::compose(frames, found->desktopRect), 480, 270);
-        }
-    } catch (...) {
-    }
-    SettingsWindow window(instance_, hwnd_, settings_, std::move(preview));
+    SettingsWindow window(instance_, hwnd_, settings_);
     settingsWindow_ = &window;
     struct SettingsWindowGuard {
         SettingsWindow*& slot;
@@ -221,6 +239,7 @@ void App::showSettings() {
     if (!accepted) return;
     settings_ = window.settings(); language_ = ResolveLanguage(settings_.language);
     (void)settingsStore_.save(settings_); applyStartupSetting(); registerHotkey();
+    if (window.calibrationRequested()) beginCalibration();
 }
 
 void App::applyStartupSetting() noexcept {

@@ -56,11 +56,6 @@ private:
     CommitHandler commit_;
     std::vector<Button> modeButtons_;
     std::vector<Button> toolButtons_;
-    bool calibrationPanelOpen_{};
-    RECT calibrationPanelRect_{};
-    RECT outputBrightnessSliderRect_{};
-    RECT highlightCompressionSliderRect_{};
-    RECT resetCalibrationRect_{};
     HDC backBufferDc_{};
     HBITMAP backBufferBitmap_{};
     HGDIOBJ backBufferPrevious_{};
@@ -74,8 +69,6 @@ private:
     [[nodiscard]] bool ensureBackBuffer(HDC reference, int width, int height);
     void releaseBackBuffer() noexcept;
     void updateCalibrationPreview();
-    void setCalibrationFromPoint(int id, int x);
-    [[nodiscard]] int calibrationValue(int id) const noexcept;
     void updateMaskedPreview();
     void rebuildButtons();
     [[nodiscard]] int buttonAt(POINT clientPoint) const noexcept;

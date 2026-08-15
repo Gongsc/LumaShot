@@ -8,7 +8,8 @@ enum class StringId {
     Copy, Save, Cancel, Pen, Rectangle, Arrow, Text, Undo, Redo, Color, LineWidth,
     Language, Automatic, Chinese, English, Hotkey, IncludeCursor, LaunchAtLogin,
     SettingsSubtitle, CaptureControls, Behavior, HdrCalibrationTitle, HdrCalibrationHint,
-    HdrOutputBrightness, HdrHighlightCompression, LivePreview, ResetCalibration,
+    HdrOutputBrightness, HdrHighlightCompression, StartCalibration, CalibrationInstructions,
+    ResetCalibration, Apply, HdrCalibrationUnavailable,
     HotkeyUnavailable, CaptureFailed, SaveFailed, ClipboardFailed, Unsupported,
     Saved, Copied, PngDescription, JxrDescription
 };

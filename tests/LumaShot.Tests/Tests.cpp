@@ -67,6 +67,9 @@ void AnnotationTests() {
           !Localized(StringId::CaptureControls, Language::SimplifiedChinese).empty() &&
           !Localized(StringId::Behavior, Language::SimplifiedChinese).empty() &&
           !Localized(StringId::HdrCalibrationTitle, Language::SimplifiedChinese).empty() &&
+          Localized(StringId::StartCalibration, Language::English) == L"Start calibration" &&
+          !Localized(StringId::CalibrationInstructions, Language::SimplifiedChinese).empty() &&
+          !Localized(StringId::HdrCalibrationUnavailable, Language::English).empty() &&
           !Localized(StringId::HdrOutputBrightness, Language::English).empty(),
           "loads Fluent settings resources");
 }
