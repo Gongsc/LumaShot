@@ -6,7 +6,7 @@ Run from PowerShell:
 
 ```powershell
 .\scripts\build.ps1 -Configuration Release -RunTests
-.\bin\Release\HDRSnapshot.Tests.exe --capture-smoke
+.\bin\Release\LumaShot.Tests.exe --capture-smoke
 ```
 
 The test executable covers negative-coordinate geometry and cropping, mixed SDR/HDR composition, half-float values above `1.0`, Direct2D/CPU SDR tone mapping, all annotation variants and undo/redo, English/Chinese resources, settings round trips and corrupt-file recovery, PNG encoding, lossless floating-point JPEG XR round trips, and the `CF_DIBV5`/`CF_DIB` payload structures. `--capture-smoke` performs a real Windows Graphics Capture session and validates the returned `R16G16B16A16_FLOAT` frame dimensions.

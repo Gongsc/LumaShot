@@ -3,7 +3,7 @@ bin/
 obj/
 artifacts/
 x64/
-src/HDRSnapshot.App/assets/HDRSnapshot.ico
+src/LumaShot.App/assets/LumaShot.ico
 *.user
 *.aps
 *.VC.db

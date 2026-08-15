@@ -14,9 +14,9 @@ $combinedPath = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
 [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
 [Environment]::SetEnvironmentVariable('Path', $combinedPath, 'Process')
 
-& $msbuild (Join-Path $repoRoot 'HDRSnapshot.sln') /m:1 /p:Configuration=$Configuration /p:Platform=x64 /v:minimal
+& $msbuild (Join-Path $repoRoot 'LumaShot.sln') /m:1 /p:Configuration=$Configuration /p:Platform=x64 /v:minimal
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($RunTests) {
-    & (Join-Path $repoRoot "bin\$Configuration\HDRSnapshot.Tests.exe")
+    & (Join-Path $repoRoot "bin\$Configuration\LumaShot.Tests.exe")
     exit $LASTEXITCODE
 }
