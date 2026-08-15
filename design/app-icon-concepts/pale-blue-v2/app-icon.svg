@@ -1,20 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256">
   <defs>
-    <linearGradient id="sky" x1="34" y1="24" x2="226" y2="238" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#A7E7FF"/>
-      <stop offset="0.52" stop-color="#7BD4F5"/>
-      <stop offset="1" stop-color="#55BCE8"/>
+    <linearGradient id="cream" x1="34" y1="24" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F3FAFF"/>
+      <stop offset="0.52" stop-color="#E3F2FF"/>
+      <stop offset="1" stop-color="#CDE6F8"/>
     </linearGradient>
     <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(76 62) rotate(43) scale(190)">
       <stop stop-color="#FFFFFF" stop-opacity=".52"/>
       <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </radialGradient>
     <filter id="markShadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="5" stdDeviation="3.5" flood-color="#176D99" flood-opacity=".46"/>
+      <feDropShadow dx="0" dy="5" stdDeviation="3.5" flood-color="#6D93B0" flood-opacity=".38"/>
     </filter>
   </defs>
 
-  <rect width="256" height="256" rx="58" fill="url(#sky)"/>
+  <rect width="256" height="256" rx="58" fill="url(#cream)"/>
   <rect width="256" height="256" rx="58" fill="url(#glow)"/>
   <rect x="7" y="7" width="242" height="242" rx="52" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-opacity=".72"/>
 
@@ -25,5 +25,5 @@
     <path d="M203 162v34a7 7 0 0 1-7 7h-34"/>
   </g>
   <path d="M128 91c5.8 19.8 17.2 31.2 37 37-19.8 5.8-31.2 17.2-37 37-5.8-19.8-17.2-31.2-37-37 19.8-5.8 31.2-17.2 37-37Z"
-        fill="#FFFFFF" stroke="#2586B5" stroke-width="2.5" stroke-opacity=".34" paint-order="stroke fill"/>
+        fill="#FFFFFF" stroke="#7EA4C1" stroke-width="2.5" stroke-opacity=".3" paint-order="stroke fill"/>
 </svg>

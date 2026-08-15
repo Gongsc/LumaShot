@@ -1,9 +1,12 @@
 #include "OverlayWindow.h"
 #include "CaptureService.h"
+#include "resource.h"
 #include <LumaShot/Geometry.h>
 #include <LumaShot/Localization.h>
 #include <dwmapi.h>
 #include <commctrl.h>
+#include <wincodec.h>
+#include <wrl/client.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -12,6 +15,8 @@
 
 namespace lumashot {
 namespace {
+using Microsoft::WRL::ComPtr;
+
 constexpr wchar_t ClassName[] = L"LumaShot.Overlay";
 constexpr UINT CommitTextMessage = WM_APP + 41;
 constexpr int ModeRegion = 100;
@@ -140,8 +145,8 @@ HPEN CreateFluentPen(COLORREF color, int width) {
                         static_cast<DWORD>(std::max(1, width)), &brush, 0, nullptr);
 }
 
-void DrawButtonIcon(HDC dc, int id, const RECT& bounds, COLORREF color,
-                    ColorRgba annotationColor, int annotationWidth) {
+void DrawLegacyButtonIcon(HDC dc, int id, const RECT& bounds, COLORREF color,
+                          ColorRgba annotationColor, int annotationWidth) {
     const int cx = (bounds.left + bounds.right) / 2;
     const int cy = (bounds.top + bounds.bottom) / 2;
     const int left = cx - 10;
@@ -263,6 +268,128 @@ void DrawButtonIcon(HDC dc, int id, const RECT& bounds, COLORREF color,
     SelectObject(dc, oldBrush);
     SelectObject(dc, oldPen);
     DeleteObject(pen);
+}
+
+int ToolbarIconIndex(int id) noexcept {
+    switch (id) {
+    case ModeRegion: return 0;
+    case ModeWindow: return 1;
+    case ModeMonitor: return 2;
+    case ModeAll: return 3;
+    case ToolPen: return 4;
+    case ToolRectangle: return 5;
+    case ToolArrow: return 6;
+    case ToolText: return 7;
+    case ToolUndo: return 8;
+    case ToolRedo: return 9;
+    case ToolColor: return 10;
+    case ToolWidth: return 11;
+    case ActionCopy: return 12;
+    case ActionSave: return 13;
+    case ActionCancel: return 14;
+    default: return -1;
+    }
+}
+
+class ToolbarIconAtlas final {
+public:
+    ToolbarIconAtlas() noexcept { load(); }
+    ~ToolbarIconAtlas() {
+        if (memoryDc_) {
+            if (previousBitmap_) SelectObject(memoryDc_, previousBitmap_);
+            DeleteDC(memoryDc_);
+        }
+        if (bitmap_) DeleteObject(bitmap_);
+    }
+    ToolbarIconAtlas(const ToolbarIconAtlas&) = delete;
+    ToolbarIconAtlas& operator=(const ToolbarIconAtlas&) = delete;
+
+    [[nodiscard]] bool draw(HDC target, int index, const RECT& bounds, BYTE opacity) const noexcept {
+        constexpr int iconSize = 24;
+        constexpr int iconCount = 15;
+        if (!memoryDc_ || index < 0 || index >= iconCount) return false;
+        const int x = (bounds.left + bounds.right - iconSize) / 2;
+        const int y = (bounds.top + bounds.bottom - iconSize) / 2;
+        BLENDFUNCTION blend{AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
+        return AlphaBlend(target, x, y, iconSize, iconSize,
+                          memoryDc_, index * iconSize, 0, iconSize, iconSize, blend) != FALSE;
+    }
+
+private:
+    HDC memoryDc_{};
+    HBITMAP bitmap_{};
+    HGDIOBJ previousBitmap_{};
+
+    void load() noexcept {
+        const HMODULE module = GetModuleHandleW(nullptr);
+        const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(IDR_TOOLBAR_ICONS), RT_RCDATA);
+        if (!resource) return;
+        const HGLOBAL loaded = LoadResource(module, resource);
+        if (!loaded) return;
+        const DWORD byteCount = SizeofResource(module, resource);
+        const auto* bytes = static_cast<const BYTE*>(LockResource(loaded));
+        if (!bytes || byteCount == 0) return;
+
+        ComPtr<IWICImagingFactory> factory;
+        ComPtr<IWICStream> stream;
+        ComPtr<IWICBitmapDecoder> decoder;
+        ComPtr<IWICBitmapFrameDecode> frame;
+        ComPtr<IWICFormatConverter> converter;
+        if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                    IID_PPV_ARGS(&factory))) ||
+            FAILED(factory->CreateStream(&stream)) ||
+            FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(bytes), byteCount)) ||
+            FAILED(factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder)) ||
+            FAILED(decoder->GetFrame(0, &frame)) ||
+            FAILED(factory->CreateFormatConverter(&converter)) ||
+            FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+                                         WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) return;
+
+        UINT width{}, height{};
+        if (FAILED(converter->GetSize(&width, &height)) || width != 360 || height != 24) return;
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(info.bmiHeader);
+        info.bmiHeader.biWidth = static_cast<LONG>(width);
+        info.bmiHeader.biHeight = -static_cast<LONG>(height);
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        void* pixels{};
+        HDC screen = GetDC(nullptr);
+        bitmap_ = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+        ReleaseDC(nullptr, screen);
+        if (!bitmap_ || !pixels ||
+            FAILED(converter->CopyPixels(nullptr, width * 4, width * height * 4, static_cast<BYTE*>(pixels)))) {
+            if (bitmap_) { DeleteObject(bitmap_); bitmap_ = nullptr; }
+            return;
+        }
+        memoryDc_ = CreateCompatibleDC(nullptr);
+        if (!memoryDc_) { DeleteObject(bitmap_); bitmap_ = nullptr; return; }
+        previousBitmap_ = SelectObject(memoryDc_, bitmap_);
+    }
+};
+
+void DrawButtonIcon(HDC dc, int id, const RECT& bounds, COLORREF color,
+                    ColorRgba annotationColor, int annotationWidth) {
+    static const ToolbarIconAtlas atlas;
+    const BYTE opacity = GetRValue(color) < 200 ? 115 : 255;
+    if (!atlas.draw(dc, ToolbarIconIndex(id), bounds, opacity)) {
+        DrawLegacyButtonIcon(dc, id, bounds, color, annotationColor, annotationWidth);
+        return;
+    }
+
+    const int centerX = (bounds.left + bounds.right) / 2;
+    const int indicatorY = bounds.bottom - 4;
+    HPEN indicator{};
+    if (id == ToolColor) indicator = CreateFluentPen(ToColor(annotationColor), 3);
+    else if (id == ToolWidth) indicator = CreateFluentPen(color, std::max(1, annotationWidth / 2));
+    if (indicator) {
+        const auto previous = SelectObject(dc, indicator);
+        MoveToEx(dc, centerX - 5, indicatorY, nullptr);
+        LineTo(dc, centerX + 5, indicatorY);
+        SelectObject(dc, previous);
+        DeleteObject(indicator);
+    }
 }
 
 void FillRoundRect(HDC dc, const RECT& rect, int radius, COLORREF fill, COLORREF outline) {

@@ -4,6 +4,7 @@ obj/
 artifacts/
 x64/
 src/LumaShot.App/assets/LumaShot.ico
+src/LumaShot.App/assets/LumaShotTray.ico
 *.user
 *.aps
 *.VC.db

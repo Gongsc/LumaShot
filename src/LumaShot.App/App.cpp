@@ -93,9 +93,7 @@ LRESULT App::handleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
 void App::addTrayIcon() {
     tray_ = {}; tray_.cbSize = sizeof(tray_); tray_.hWnd = hwnd_; tray_.uID = TrayId;
     tray_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP; tray_.uCallbackMessage = TrayMessage;
-    appIcon_ = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_LUMASHOT), IMAGE_ICON,
-                                             GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
-    if (!appIcon_) appIcon_ = CreateAppIcon(GetSystemMetrics(SM_CXSMICON));
+    appIcon_ = CreateAppIcon(GetSystemMetrics(SM_CXSMICON));
     tray_.hIcon = appIcon_; wcscpy_s(tray_.szTip, L"LumaShot");
     Shell_NotifyIconW(NIM_ADD, &tray_); tray_.uVersion = NOTIFYICON_VERSION_4; Shell_NotifyIconW(NIM_SETVERSION, &tray_);
 }

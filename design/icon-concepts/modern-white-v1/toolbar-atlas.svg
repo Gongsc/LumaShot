@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="360" height="24" viewBox="0 0 360 24">
+  <image href="region.svg"       xlink:href="region.svg"       x="0"   y="0" width="24" height="24"/>
+  <image href="window.svg"       xlink:href="window.svg"       x="24"  y="0" width="24" height="24"/>
+  <image href="monitor.svg"      xlink:href="monitor.svg"      x="48"  y="0" width="24" height="24"/>
+  <image href="all-displays.svg" xlink:href="all-displays.svg" x="72"  y="0" width="24" height="24"/>
+  <image href="pen.svg"          xlink:href="pen.svg"          x="96"  y="0" width="24" height="24"/>
+  <image href="rectangle.svg"    xlink:href="rectangle.svg"    x="120" y="0" width="24" height="24"/>
+  <image href="arrow.svg"        xlink:href="arrow.svg"        x="144" y="0" width="24" height="24"/>
+  <image href="text.svg"         xlink:href="text.svg"         x="168" y="0" width="24" height="24"/>
+  <image href="undo.svg"         xlink:href="undo.svg"         x="192" y="0" width="24" height="24"/>
+  <image href="redo.svg"         xlink:href="redo.svg"         x="216" y="0" width="24" height="24"/>
+  <image href="color.svg"        xlink:href="color.svg"        x="240" y="0" width="24" height="24"/>
+  <image href="line-width.svg"   xlink:href="line-width.svg"   x="264" y="0" width="24" height="24"/>
+  <image href="copy.svg"         xlink:href="copy.svg"         x="288" y="0" width="24" height="24"/>
+  <image href="save.svg"         xlink:href="save.svg"         x="312" y="0" width="24" height="24"/>
+  <image href="cancel.svg"       xlink:href="cancel.svg"       x="336" y="0" width="24" height="24"/>
+</svg>

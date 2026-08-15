@@ -23,8 +23,9 @@
   <ItemGroup><ResourceCompile Include="LumaShot.rc" /></ItemGroup>
   <ItemGroup><Manifest Include="app.manifest" /></ItemGroup>
   <ItemGroup><ProjectReference Include="..\LumaShot.Core\LumaShot.Core.vcxproj"><Project>{2894E9E1-A623-4588-9D7A-88124723FEF2}</Project></ProjectReference></ItemGroup>
-  <Target Name="GenerateApplicationIcon" BeforeTargets="ResourceCompile">
-    <Exec Command="&quot;$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\generate-icon.ps1&quot; -OutputPath &quot;$(MSBuildThisFileDirectory)assets\LumaShot.ico&quot;" />
+  <Target Name="GenerateApplicationIcons" BeforeTargets="ResourceCompile">
+    <Exec Command="&quot;$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\generate-icon.ps1&quot; -SourcePath &quot;$(MSBuildThisFileDirectory)assets\LumaShot.png&quot; -OutputPath &quot;$(MSBuildThisFileDirectory)assets\LumaShot.ico&quot;" />
+    <Exec Command="&quot;$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\generate-icon.ps1&quot; -SourcePath &quot;$(MSBuildThisFileDirectory)assets\LumaShotTray.png&quot; -OutputPath &quot;$(MSBuildThisFileDirectory)assets\LumaShotTray.ico&quot;" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

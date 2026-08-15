@@ -17,6 +17,8 @@ Repeat the following on single-SDR, single-HDR, and mixed HDR/SDR desktops, incl
 
 - Exercise region, window, current-display, and all-display modes; include a cross-display region and a display with a negative virtual origin.
 - Move and resize the selection using every edge and corner. Confirm the cursor changes to four-way move, horizontal/vertical resize, and the matching diagonal resize cursor before and throughout each drag, and that output dimensions exactly match the selected physical pixels.
+- Confirm all 15 capture-mode, annotation, and action buttons use the modern white icon set with crisp antialiased edges, transparent backgrounds, no dark halos, and visibly dimmed undo/redo icons when disabled. Verify the color and line-width state indicators update when cycled.
+- Confirm the executable, window, and taskbar use the sky-blue application icon at 16–256px, while the notification-area icon uses the separate white transparent variant on both light and dark Windows taskbars.
 - Draw pen, rectangle, arrow, and Chinese/English IME text annotations; cycle color and width; test undo and redo.
 - In Settings, confirm the HDR section contains only Start calibration—no embedded sliders or thumbnail. Start calibration on an HDR desktop and verify fine text and one-pixel edges remain sharp at each display's native physical resolution. Drag and reposition the translucent panel, adjust both sliders, and verify the full-screen capture updates continuously. Confirm Reset restores defaults, Cancel/`Esc` discards changes, and Apply persists them for later PNG and clipboard output. On an SDR-only desktop, confirm the app reports that calibration is unavailable.
 - Confirm the overlay and toolbar never appear in output, with and without cursor capture.

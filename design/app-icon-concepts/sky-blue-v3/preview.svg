@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1080" height="700" viewBox="0 0 1080 700">
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#111319"/>
+      <stop offset="1" stop-color="#1B1E27"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-color="#000000" flood-opacity=".32"/>
+    </filter>
+    <pattern id="checker" width="16" height="16" patternUnits="userSpaceOnUse">
+      <rect width="16" height="16" fill="#D8D8D8"/>
+      <rect width="8" height="8" fill="#BEBEBE"/>
+      <rect x="8" y="8" width="8" height="8" fill="#BEBEBE"/>
+    </pattern>
+  </defs>
+
+  <rect width="1080" height="700" rx="28" fill="url(#page)"/>
+  <text x="40" y="48" fill="#F7F8FA" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="24" font-weight="650">LumaShot · 应用图标候选 V3</text>
+  <text x="40" y="76" fill="#969CAA" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="14">天蓝色应用图标 · 白色捕捉光芒 · 透明托盘变体 · SVG 矢量母版</text>
+
+  <rect x="40" y="105" width="440" height="550" rx="22" fill="#22252E" stroke="#373C48"/>
+  <image href="app-icon.svg" xlink:href="app-icon.svg" x="100" y="145" width="320" height="320" filter="url(#shadow)"/>
+  <text x="260" y="512" fill="#F2F3F6" text-anchor="middle" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="19" font-weight="600">应用图标</text>
+  <text x="260" y="540" fill="#9CA2AF" text-anchor="middle" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="13">天蓝渐变背景 / 纯白图形 / 深蓝柔和投影</text>
+  <text x="260" y="572" fill="#747B89" text-anchor="middle" font-family="Segoe UI Variable, sans-serif" font-size="12">VECTOR MASTER · 1024 PX REVIEW EXPORT</text>
+
+  <rect x="505" y="105" width="535" height="236" rx="22" fill="#22252E" stroke="#373C48"/>
+  <text x="535" y="140" fill="#F2F3F6" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="16" font-weight="600">应用尺寸预览</text>
+  <g filter="url(#shadow)">
+    <image href="app-icon.svg" xlink:href="app-icon.svg" x="535" y="166" width="128" height="128"/>
+    <image href="app-icon.svg" xlink:href="app-icon.svg" x="705" y="198" width="64" height="64"/>
+    <image href="app-icon.svg" xlink:href="app-icon.svg" x="816" y="214" width="32" height="32"/>
+    <image href="app-icon.svg" xlink:href="app-icon.svg" x="909" y="222" width="16" height="16"/>
+  </g>
+  <g fill="#8F96A4" font-family="Segoe UI Variable, sans-serif" font-size="11" text-anchor="middle">
+    <text x="599" y="316">128 PX</text><text x="737" y="282">64 PX</text><text x="832" y="266">32 PX</text><text x="917" y="258">16 PX</text>
+  </g>
+
+  <rect x="505" y="365" width="535" height="290" rx="22" fill="#22252E" stroke="#373C48"/>
+  <text x="535" y="401" fill="#F2F3F6" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="16" font-weight="600">透明托盘图标</text>
+  <rect x="535" y="424" width="475" height="70" rx="13" fill="#17191E" stroke="#333741"/>
+  <text x="557" y="451" fill="#AAB0BC" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="12">深色任务栏</text>
+  <image href="tray-icon.svg" xlink:href="tray-icon.svg" x="860" y="443" width="32" height="32"/>
+  <image href="tray-icon.svg" xlink:href="tray-icon.svg" x="915" y="447" width="24" height="24"/>
+  <image href="tray-icon.svg" xlink:href="tray-icon.svg" x="963" y="451" width="16" height="16"/>
+
+  <rect x="535" y="510" width="475" height="70" rx="13" fill="#F5F5F5" stroke="#FFFFFF"/>
+  <text x="557" y="537" fill="#555B66" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="12">浅色任务栏</text>
+  <image href="tray-icon.svg" xlink:href="tray-icon.svg" x="860" y="529" width="32" height="32"/>
+  <image href="tray-icon.svg" xlink:href="tray-icon.svg" x="915" y="533" width="24" height="24"/>
+  <image href="tray-icon.svg" xlink:href="tray-icon.svg" x="963" y="537" width="16" height="16"/>
+
+  <rect x="535" y="596" width="475" height="37" rx="10" fill="url(#checker)"/>
+  <image href="tray-icon.svg" xlink:href="tray-icon.svg" x="760" y="602" width="24" height="24"/>
+  <text x="549" y="620" fill="#343841" font-family="Segoe UI Variable, Microsoft YaHei UI, sans-serif" font-size="12" font-weight="600">棋盘格用于确认背景完全透明</text>
+</svg>
