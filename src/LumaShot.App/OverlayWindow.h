@@ -26,6 +26,8 @@ private:
     HINSTANCE instance_{};
     HWND hwnd_{};
     HWND textEditor_{};
+    HWND tooltip_{};
+    HFONT textEditorFont_{};
     CaptureFrameSet frames_;
     ImageF16 previewSource_;
     ImageBgra8 preview_;
@@ -64,10 +66,15 @@ private:
     int backBufferHeight_{};
     POINT mouseClient_{};
     bool mouseInside_{};
+    UINT uiDpi_{96};
 
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     static LRESULT CALLBACK EditProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR data);
+    static LRESULT CALLBACK ButtonProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+                                       UINT_PTR id, DWORD_PTR data);
     LRESULT handleMessage(UINT message, WPARAM wparam, LPARAM lparam);
+    void createControls();
+    void drawButton(const DRAWITEMSTRUCT& item);
     void paint();
     [[nodiscard]] bool ensureBackBuffer(HDC reference, int width, int height);
     void releaseBackBuffer() noexcept;
@@ -77,6 +84,7 @@ private:
     [[nodiscard]] RECT magnifierRect(POINT clientPoint, const RECT& client) const noexcept;
     void drawMagnifier(HDC dc, const RECT& client) const;
     void rebuildButtons();
+    void updateUiDpi();
     [[nodiscard]] int buttonAt(POINT clientPoint) const noexcept;
     void activateButton(int id);
     void setMode(CaptureMode mode);
@@ -95,6 +103,7 @@ private:
     void beginText(POINT screenPoint);
     void commitText(bool cancel);
     bool perform(OverlayAction action);
+    [[nodiscard]] int scale(int value) const noexcept;
 };
 
 } // namespace lumashot

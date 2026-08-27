@@ -19,6 +19,7 @@ private:
     Language displayLanguage_{};
     UINT dpi_{96};
     bool dark_{};
+    bool highContrast_{};
     bool done_{};
     bool accepted_{};
     bool calibrationRequested_{};

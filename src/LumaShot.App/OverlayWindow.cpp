@@ -5,6 +5,8 @@
 #include <LumaShot/Localization.h>
 #include <dwmapi.h>
 #include <commctrl.h>
+#include <shellscalingapi.h>
+#include <uxtheme.h>
 #include <wincodec.h>
 #include <wrl/client.h>
 #include <algorithm>
@@ -43,9 +45,29 @@ constexpr std::array<ColorRgba, 6> AnnotationColors{{
     {255, 55, 55, 255}, {255, 213, 55, 255}, {60, 205, 95, 255},
     {50, 205, 230, 255}, {65, 125, 255, 255}, {255, 255, 255, 255}}};
 constexpr std::array<float, 3> AnnotationWidths{2.0f, 4.0f, 8.0f};
+constexpr std::array ButtonDefinitions{
+    std::pair{ModeRegion, StringId::Region}, std::pair{ModeWindow, StringId::Window},
+    std::pair{ModeMonitor, StringId::Monitor}, std::pair{ModeAll, StringId::VirtualDesktop},
+    std::pair{ToolPen, StringId::Pen}, std::pair{ToolRectangle, StringId::Rectangle},
+    std::pair{ToolArrow, StringId::Arrow}, std::pair{ToolText, StringId::Text},
+    std::pair{ToolUndo, StringId::Undo}, std::pair{ToolRedo, StringId::Redo},
+    std::pair{ToolColor, StringId::Color}, std::pair{ToolWidth, StringId::LineWidth},
+    std::pair{ActionCopy, StringId::Copy}, std::pair{ActionSave, StringId::Save},
+    std::pair{ActionCancel, StringId::Cancel}};
 
 POINT PointFromLParam(LPARAM value) { return POINT{GET_X_LPARAM(value), GET_Y_LPARAM(value)}; }
 bool PointIn(const RECT& rect, POINT point) { return PtInRect(&rect, point) != FALSE; }
+
+bool IsHighContrastEnabled() noexcept {
+    HIGHCONTRASTW value{sizeof(value)};
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0) &&
+           (value.dwFlags & HCF_HIGHCONTRASTON) != 0;
+}
+
+UINT DpiForMonitor(HMONITOR monitor) noexcept {
+    UINT x{96}, y{96};
+    return monitor && SUCCEEDED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &x, &y)) ? x : 96;
+}
 
 COLORREF ToColor(ColorRgba color) { return RGB(color.r, color.g, color.b); }
 
@@ -107,16 +129,15 @@ void DimOutsideSelection(HDC dc, const RECT& client, const RECT& selected, BYTE 
     }
 }
 
-void DrawSelectionHandles(HDC dc, const RECT& selected) {
-    constexpr int radius = 4;
+void DrawSelectionHandles(HDC dc, const RECT& selected, int radius, bool highContrast) {
     const int centerX = (selected.left + selected.right) / 2;
     const int centerY = (selected.top + selected.bottom) / 2;
     const std::array<POINT, 8> handles{{
         {selected.left, selected.top}, {centerX, selected.top}, {selected.right, selected.top},
         {selected.left, centerY}, {selected.right, centerY},
         {selected.left, selected.bottom}, {centerX, selected.bottom}, {selected.right, selected.bottom}}};
-    HBRUSH fill = CreateSolidBrush(RGB(255, 255, 255));
-    HPEN outline = CreatePen(PS_SOLID, 1, RGB(0, 120, 212));
+    HBRUSH fill = CreateSolidBrush(highContrast ? GetSysColor(COLOR_WINDOW) : RGB(255, 255, 255));
+    HPEN outline = CreatePen(PS_SOLID, 1, highContrast ? GetSysColor(COLOR_HIGHLIGHT) : RGB(0, 120, 212));
     const auto oldBrush = SelectObject(dc, fill);
     const auto oldPen = SelectObject(dc, outline);
     for (const auto point : handles) {
@@ -309,15 +330,17 @@ public:
     ToolbarIconAtlas(const ToolbarIconAtlas&) = delete;
     ToolbarIconAtlas& operator=(const ToolbarIconAtlas&) = delete;
 
-    [[nodiscard]] bool draw(HDC target, int index, const RECT& bounds, BYTE opacity) const noexcept {
-        constexpr int iconSize = 24;
+    [[nodiscard]] bool draw(HDC target, int index, const RECT& bounds, BYTE opacity,
+                            int destinationSize) const noexcept {
+        constexpr int sourceSize = 24;
         constexpr int iconCount = 15;
         if (!memoryDc_ || index < 0 || index >= iconCount) return false;
-        const int x = (bounds.left + bounds.right - iconSize) / 2;
-        const int y = (bounds.top + bounds.bottom - iconSize) / 2;
+        destinationSize = std::max(1, destinationSize);
+        const int x = (bounds.left + bounds.right - destinationSize) / 2;
+        const int y = (bounds.top + bounds.bottom - destinationSize) / 2;
         BLENDFUNCTION blend{AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
-        return AlphaBlend(target, x, y, iconSize, iconSize,
-                          memoryDc_, index * iconSize, 0, iconSize, iconSize, blend) != FALSE;
+        return AlphaBlend(target, x, y, destinationSize, destinationSize,
+                          memoryDc_, index * sourceSize, 0, sourceSize, sourceSize, blend) != FALSE;
     }
 
 private:
@@ -375,23 +398,29 @@ private:
 };
 
 void DrawButtonIcon(HDC dc, int id, const RECT& bounds, COLORREF color,
-                    ColorRgba annotationColor, int annotationWidth) {
+                    ColorRgba annotationColor, int annotationWidth, UINT dpi,
+                    bool highContrast) {
+    if (highContrast) {
+        DrawLegacyButtonIcon(dc, id, bounds, color, annotationColor, annotationWidth);
+        return;
+    }
     static const ToolbarIconAtlas atlas;
     const BYTE opacity = GetRValue(color) < 200 ? 115 : 255;
-    if (!atlas.draw(dc, ToolbarIconIndex(id), bounds, opacity)) {
+    if (!atlas.draw(dc, ToolbarIconIndex(id), bounds, opacity, MulDiv(24, static_cast<int>(dpi), 96))) {
         DrawLegacyButtonIcon(dc, id, bounds, color, annotationColor, annotationWidth);
         return;
     }
 
     const int centerX = (bounds.left + bounds.right) / 2;
-    const int indicatorY = bounds.bottom - 4;
+    const int indicatorY = bounds.bottom - MulDiv(4, static_cast<int>(dpi), 96);
     HPEN indicator{};
     if (id == ToolColor) indicator = CreateFluentPen(ToColor(annotationColor), 3);
     else if (id == ToolWidth) indicator = CreateFluentPen(color, std::max(1, annotationWidth / 2));
     if (indicator) {
         const auto previous = SelectObject(dc, indicator);
-        MoveToEx(dc, centerX - 5, indicatorY, nullptr);
-        LineTo(dc, centerX + 5, indicatorY);
+        const int halfWidth = MulDiv(5, static_cast<int>(dpi), 96);
+        MoveToEx(dc, centerX - halfWidth, indicatorY, nullptr);
+        LineTo(dc, centerX + halfWidth, indicatorY);
         SelectObject(dc, previous);
         DeleteObject(indicator);
     }
@@ -421,26 +450,73 @@ OverlayWindow::OverlayWindow(HINSTANCE instance, CaptureFrameSet frames, Capture
 
 bool OverlayWindow::run(const CommitHandler& commit) {
     commit_ = commit;
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES};
+    InitCommonControlsEx(&controls);
     WNDCLASSEXW cls{sizeof(cls)};
     cls.hInstance = instance_; cls.lpfnWndProc = WindowProc; cls.lpszClassName = ClassName;
     cls.hCursor = LoadCursorW(nullptr, IDC_CROSS); cls.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     RegisterClassExW(&cls);
     const auto bounds = frames_.virtualDesktop;
-    hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, ClassName, L"LumaShot", WS_POPUP,
+    hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
+                            ClassName, L"LumaShot", WS_POPUP | WS_CLIPCHILDREN,
                             bounds.left, bounds.top, bounds.width(), bounds.height(), nullptr, nullptr, instance_, this);
     if (!hwnd_) return false;
     SetWindowDisplayAffinity(hwnd_, WDA_EXCLUDEFROMCAPTURE);
+    createControls();
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
     SetFocus(hwnd_);
     setMode(mode_);
     MSG message{};
     while (!finished_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        bool handledShortcut = false;
+        if (message.message == WM_KEYDOWN && message.hwnd != textEditor_) {
+            const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            if (message.wParam == VK_ESCAPE ||
+                (control && (message.wParam == 'C' || message.wParam == 'S' ||
+                             message.wParam == 'Z' || message.wParam == 'Y'))) {
+                SendMessageW(hwnd_, WM_KEYDOWN, message.wParam, message.lParam);
+                handledShortcut = true;
+            }
+        }
+        if (!handledShortcut && !IsDialogMessageW(hwnd_, &message)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
     }
     if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
     return succeeded_;
+}
+
+void OverlayWindow::createControls() {
+    tooltip_ = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr,
+                               WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                               hwnd_, nullptr, instance_, nullptr);
+    if (tooltip_) SetWindowPos(tooltip_, HWND_TOPMOST, 0, 0, 0, 0,
+                               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    for (std::size_t index = 0; index < ButtonDefinitions.size(); ++index) {
+        const auto [id, labelId] = ButtonDefinitions[index];
+        const auto label = Localized(labelId, language_);
+        DWORD style = WS_CHILD | WS_TABSTOP | BS_OWNERDRAW;
+        if (index == 0 || index == 4) style |= WS_GROUP;
+        HWND control = CreateWindowExW(0, L"BUTTON", label.data(), style,
+                                       0, 0, 1, 1, hwnd_,
+                                       reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance_, nullptr);
+        if (!control) continue;
+        SetWindowTheme(control, L"", nullptr);
+        SetWindowSubclass(control, ButtonProc, static_cast<UINT_PTR>(id),
+                          reinterpret_cast<DWORD_PTR>(this));
+        if (tooltip_) {
+            TOOLINFOW tool{sizeof(tool)};
+            tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+            tool.hwnd = hwnd_;
+            tool.uId = reinterpret_cast<UINT_PTR>(control);
+            tool.lpszText = const_cast<wchar_t*>(label.data());
+            SendMessageW(tooltip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+        }
+    }
 }
 
 LRESULT CALLBACK OverlayWindow::WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -461,10 +537,62 @@ LRESULT CALLBACK OverlayWindow::EditProc(HWND window, UINT message, WPARAM wpara
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
+LRESULT CALLBACK OverlayWindow::ButtonProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+                                           UINT_PTR id, DWORD_PTR data) {
+    auto* self = reinterpret_cast<OverlayWindow*>(data);
+    switch (message) {
+    case WM_MOUSEMOVE: {
+        if (self->hoveredButton_ != static_cast<int>(id)) {
+            if (HWND previous = GetDlgItem(self->hwnd_, self->hoveredButton_))
+                InvalidateRect(previous, nullptr, FALSE);
+            self->hoveredButton_ = static_cast<int>(id);
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
+        TrackMouseEvent(&tracking);
+        break;
+    }
+    case WM_MOUSELEAVE:
+        if (self->hoveredButton_ == static_cast<int>(id)) {
+            self->hoveredButton_ = -1;
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        break;
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+        InvalidateRect(window, nullptr, FALSE);
+        break;
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(window, ButtonProc, id);
+        break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+}
+
 LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: paint(); return 0;
+    case WM_DRAWITEM:
+        if (wparam >= ModeRegion && wparam <= ActionCancel) {
+            drawButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
+            return TRUE;
+        }
+        break;
+    case WM_COMMAND:
+        if (HIWORD(wparam) == BN_CLICKED) {
+            const int id = LOWORD(wparam);
+            if ((id >= ModeRegion && id <= ModeAll) || (id >= ToolPen && id <= ActionCancel)) {
+                activateButton(id);
+                return 0;
+            }
+        }
+        break;
+    case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+    case WM_SYSCOLORCHANGE:
+        RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+        return 0;
     case WM_SETCURSOR: {
         POINT client{};
         GetCursorPos(&client);
@@ -575,6 +703,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         else {
             POINT screen = desktopFromClient(PointFromLParam(lparam));
             uiMonitor_ = MonitorFromPoint(screen, MONITOR_DEFAULTTONEAREST);
+            updateUiDpi();
         }
         dragKind_ = DragKind::None; ReleaseCapture(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
         SetCursor(cursorForPoint(PointFromLParam(lparam)));
@@ -595,16 +724,23 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         }
         if (control && wparam == 'C') { perform(OverlayAction::Copy); return 0; }
         if (control && wparam == 'S') { perform(OverlayAction::Save); return 0; }
-        if (control && wparam == 'Z') { annotations_.undo(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
-        if (control && wparam == 'Y') { annotations_.redo(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+        if (control && wparam == 'Z') { annotations_.undo(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+        if (control && wparam == 'Y') { annotations_.redo(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
         return 0;
     }
     case CommitTextMessage: commitText(wparam != 0); return 0;
     case WM_DISPLAYCHANGE: finished_ = true; DestroyWindow(hwnd_); return 0;
     case WM_CLOSE: finished_ = true; DestroyWindow(hwnd_); return 0;
-    case WM_DESTROY: releaseBackBuffer(); hwnd_ = nullptr; return 0;
+    case WM_DESTROY:
+        releaseBackBuffer();
+        if (textEditorFont_) DeleteObject(textEditorFont_);
+        textEditorFont_ = nullptr;
+        tooltip_ = nullptr;
+        hwnd_ = nullptr;
+        return 0;
     default: return DefWindowProcW(hwnd_, message, wparam, lparam);
     }
+    return DefWindowProcW(hwnd_, message, wparam, lparam);
 }
 
 void OverlayWindow::setMode(CaptureMode mode) {
@@ -627,40 +763,122 @@ void OverlayWindow::setMode(CaptureMode mode) {
         if (selected && selected->monitor) uiMonitor_ = selected->monitor;
         selectionLocked_ = true;
     } else selection_ = {};
+    updateUiDpi();
     annotations_.clear(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void OverlayWindow::rebuildButtons() {
     RECT client{}; GetClientRect(hwnd_, &client);
-    constexpr int buttonSize = 44, gap = 4;
+    const int buttonSize = scale(44);
+    const int gap = scale(4);
     constexpr int modeCount = 4;
-    constexpr int modeGroupWidth = buttonSize * modeCount + gap * (modeCount - 1);
+    const int modeGroupWidth = buttonSize * modeCount + gap * (modeCount - 1);
     const RectI monitorBounds = MonitorBounds(uiMonitor_, frames_.virtualDesktop);
     POINT monitorTopLeft = clientFromDesktop({monitorBounds.left, monitorBounds.top});
     POINT monitorBottomRight = clientFromDesktop({monitorBounds.right, monitorBounds.bottom});
     const int modeX = std::clamp(monitorTopLeft.x + (monitorBottomRight.x - monitorTopLeft.x - modeGroupWidth) / 2,
-                                 monitorTopLeft.x + 8, std::max(monitorTopLeft.x + 8, monitorBottomRight.x - modeGroupWidth - 8));
-    const int modeY = monitorTopLeft.y + 18;
-    modeButtons_ = {{{modeX, modeY, modeX + buttonSize, modeY + buttonSize}, ModeRegion, StringId::Region},
-                    {{modeX + buttonSize + gap, modeY, modeX + buttonSize * 2 + gap, modeY + buttonSize}, ModeWindow, StringId::Window},
-                    {{modeX + (buttonSize + gap) * 2, modeY, modeX + buttonSize * 3 + gap * 2, modeY + buttonSize}, ModeMonitor, StringId::Monitor},
-                    {{modeX + (buttonSize + gap) * 3, modeY, modeX + buttonSize * 4 + gap * 3, modeY + buttonSize}, ModeAll, StringId::VirtualDesktop}};
+                                  monitorTopLeft.x + scale(8),
+                                  std::max(monitorTopLeft.x + scale(8), monitorBottomRight.x - modeGroupWidth - scale(8)));
+    const int modeY = monitorTopLeft.y + scale(18);
+    modeButtons_.clear();
+    for (int index = 0; index < modeCount; ++index) {
+        const int buttonX = modeX + index * (buttonSize + gap);
+        modeButtons_.push_back({{buttonX, modeY, buttonX + buttonSize, modeY + buttonSize},
+                                ButtonDefinitions[index].first, ButtonDefinitions[index].second});
+    }
     toolButtons_.clear();
-    if (selection_.empty()) return;
-    constexpr int count = 11;
-    constexpr int toolbarWidth = buttonSize * count + gap * (count - 1);
-    const RectI toolbarScreen = PlaceToolbar(selection_, monitorBounds, toolbarWidth, buttonSize);
-    POINT toolbarOrigin = clientFromDesktop({toolbarScreen.left, toolbarScreen.top});
-    const int toolbarX = toolbarOrigin.x;
-    const int toolbarY = toolbarOrigin.y;
-    const std::array defs{
-        std::pair{ToolPen, StringId::Pen}, std::pair{ToolRectangle, StringId::Rectangle}, std::pair{ToolArrow, StringId::Arrow},
-        std::pair{ToolText, StringId::Text}, std::pair{ToolUndo, StringId::Undo}, std::pair{ToolRedo, StringId::Redo},
-        std::pair{ToolColor, StringId::Color}, std::pair{ToolWidth, StringId::LineWidth},
-        std::pair{ActionCopy, StringId::Copy}, std::pair{ActionSave, StringId::Save}, std::pair{ActionCancel, StringId::Cancel}};
-    for (int i = 0; i < count; ++i) {
-        const int buttonX = toolbarX + i * (buttonSize + gap);
-        toolButtons_.push_back({{buttonX, toolbarY, buttonX + buttonSize, toolbarY + buttonSize}, defs[i].first, defs[i].second});
+    if (!selection_.empty()) {
+        constexpr int count = 11;
+        const int toolbarWidth = buttonSize * count + gap * (count - 1);
+        const RectI toolbarScreen = PlaceToolbar(selection_, monitorBounds, toolbarWidth, buttonSize, scale(8));
+        const POINT toolbarOrigin = clientFromDesktop({toolbarScreen.left, toolbarScreen.top});
+        for (int index = 0; index < count; ++index) {
+            const int buttonX = toolbarOrigin.x + index * (buttonSize + gap);
+            const auto definition = ButtonDefinitions[index + modeCount];
+            toolButtons_.push_back({{buttonX, toolbarOrigin.y, buttonX + buttonSize, toolbarOrigin.y + buttonSize},
+                                    definition.first, definition.second});
+        }
+    }
+
+    for (const auto& definition : ButtonDefinitions) {
+        if (HWND control = GetDlgItem(hwnd_, definition.first)) ShowWindow(control, SW_HIDE);
+    }
+    const auto positionControls = [&](const std::vector<Button>& buttons) {
+        for (const auto& button : buttons) {
+            HWND control = GetDlgItem(hwnd_, button.id);
+            if (!control) continue;
+            const bool active = (button.id == ModeRegion && mode_ == CaptureMode::Region) ||
+                                (button.id == ModeWindow && mode_ == CaptureMode::Window) ||
+                                (button.id == ModeMonitor && mode_ == CaptureMode::Monitor) ||
+                                (button.id == ModeAll && mode_ == CaptureMode::VirtualDesktop) ||
+                                (button.id == ToolPen && tool_ == AnnotationTool::Pen) ||
+                                (button.id == ToolRectangle && tool_ == AnnotationTool::Rectangle) ||
+                                (button.id == ToolArrow && tool_ == AnnotationTool::Arrow) ||
+                                (button.id == ToolText && tool_ == AnnotationTool::Text);
+            const bool enabled = (button.id != ToolUndo || annotations_.canUndo()) &&
+                                 (button.id != ToolRedo || annotations_.canRedo());
+            EnableWindow(control, enabled);
+            SendMessageW(control, BM_SETCHECK, active ? BST_CHECKED : BST_UNCHECKED, 0);
+            std::wstring accessibleName(Localized(button.label, language_));
+            if (active)
+                accessibleName += L" (" + std::wstring(Localized(StringId::Selected, language_)) + L")";
+            if (button.id == ToolColor) {
+                const auto color = AnnotationColors[colorIndex_];
+                accessibleName += L" (RGB " + std::to_wstring(color.r) + L", " +
+                                  std::to_wstring(color.g) + L", " + std::to_wstring(color.b) + L")";
+            } else if (button.id == ToolWidth) {
+                accessibleName += L" (" +
+                                  std::to_wstring(static_cast<int>(AnnotationWidths[lineWidthIndex_])) +
+                                  L" px)";
+            }
+            SetWindowTextW(control, accessibleName.c_str());
+            MoveWindow(control, button.rect.left, button.rect.top,
+                       button.rect.right - button.rect.left, button.rect.bottom - button.rect.top, TRUE);
+            ShowWindow(control, SW_SHOWNOACTIVATE);
+        }
+    };
+    positionControls(modeButtons_);
+    positionControls(toolButtons_);
+}
+
+void OverlayWindow::drawButton(const DRAWITEMSTRUCT& item) {
+    const int id = static_cast<int>(item.CtlID);
+    const bool active = (id == ModeRegion && mode_ == CaptureMode::Region) ||
+                        (id == ModeWindow && mode_ == CaptureMode::Window) ||
+                        (id == ModeMonitor && mode_ == CaptureMode::Monitor) ||
+                        (id == ModeAll && mode_ == CaptureMode::VirtualDesktop) ||
+                        (id == ToolPen && tool_ == AnnotationTool::Pen) ||
+                        (id == ToolRectangle && tool_ == AnnotationTool::Rectangle) ||
+                        (id == ToolArrow && tool_ == AnnotationTool::Arrow) ||
+                        (id == ToolText && tool_ == AnnotationTool::Text);
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const bool focused = (item.itemState & ODS_FOCUS) != 0;
+    const bool hovered = hoveredButton_ == id || (item.itemState & ODS_HOTLIGHT) != 0;
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+    const bool highContrast = IsHighContrastEnabled();
+    COLORREF background{};
+    COLORREF outline{};
+    COLORREF icon{};
+    if (highContrast) {
+        const bool highlighted = active || pressed || hovered;
+        background = GetSysColor(highlighted ? COLOR_HIGHLIGHT : COLOR_WINDOW);
+        outline = GetSysColor(COLOR_WINDOWTEXT);
+        icon = GetSysColor(disabled ? COLOR_GRAYTEXT : highlighted ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
+    } else {
+        background = pressed ? RGB(0, 82, 148) : active ? RGB(0, 120, 212)
+                   : hovered ? RGB(62, 62, 66) : RGB(42, 42, 45);
+        outline = active ? RGB(72, 169, 244) : hovered ? RGB(92, 92, 97) : RGB(42, 42, 45);
+        icon = disabled ? RGB(125, 125, 130) : RGB(250, 250, 250);
+    }
+    RECT rect = item.rcItem;
+    FillRoundRect(item.hDC, rect, scale(9), background, outline);
+    if (pressed) OffsetRect(&rect, 0, scale(1));
+    DrawButtonIcon(item.hDC, id, rect, icon, AnnotationColors[colorIndex_],
+                   static_cast<int>(AnnotationWidths[lineWidthIndex_]), uiDpi_, highContrast);
+    if (focused) {
+        RECT focus = item.rcItem;
+        InflateRect(&focus, -scale(4), -scale(4));
+        DrawFocusRect(item.hDC, &focus);
     }
 }
 
@@ -671,6 +889,8 @@ int OverlayWindow::buttonAt(POINT point) const noexcept {
 }
 
 void OverlayWindow::activateButton(int id) {
+    if ((id == ToolUndo && !annotations_.canUndo()) ||
+        (id == ToolRedo && !annotations_.canRedo())) return;
     switch (id) {
     case ModeRegion: setMode(CaptureMode::Region); break; case ModeWindow: setMode(CaptureMode::Window); break;
     case ModeMonitor: setMode(CaptureMode::Monitor); break; case ModeAll: setMode(CaptureMode::VirtualDesktop); break;
@@ -683,7 +903,7 @@ void OverlayWindow::activateButton(int id) {
     case ActionCancel: finished_ = true; DestroyWindow(hwnd_); break;
     default: return;
     }
-    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    if (hwnd_) { rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); }
 }
 
 HWND OverlayWindow::windowAt(POINT point) const {
@@ -712,6 +932,7 @@ void OverlayWindow::updateWindowHover(POINT clientPoint) {
     hoveredWindow_ = candidate; selection_ = {};
     if (candidate) {
         uiMonitor_ = MonitorFromPoint(screen, MONITOR_DEFAULTTONEAREST);
+        updateUiDpi();
         RECT rect{};
         if (FAILED(DwmGetWindowAttribute(candidate, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(rect)))) GetWindowRect(candidate, &rect);
         selection_ = ClampRect(FromWin32Rect(rect), frames_.virtualDesktop);
@@ -730,6 +951,7 @@ bool OverlayWindow::lockHoveredWindow() {
         selection_ = ClampRect(frame.desktopRect, frames_.virtualDesktop);
         RECT selectedRect = ToWin32Rect(selection_);
         uiMonitor_ = frame.monitor ? frame.monitor : MonitorFromRect(&selectedRect, MONITOR_DEFAULTTONEAREST);
+        updateUiDpi();
         frames_.monitors.push_back(std::move(frame));
         previewSource_ = ColorPipeline::compose(frames_, frames_.virtualDesktop);
         updateCalibrationPreview();
@@ -746,7 +968,7 @@ bool OverlayWindow::lockHoveredWindow() {
 
 OverlayWindow::DragKind OverlayWindow::hitSelection(POINT point) const noexcept {
     if (selection_.empty()) return DragKind::None;
-    constexpr int radius = 7;
+    const int radius = scale(7);
     if (point.x < selection_.left - radius || point.x > selection_.right + radius ||
         point.y < selection_.top - radius || point.y > selection_.bottom + radius) return DragKind::None;
     const bool left = std::abs(point.x - selection_.left) <= radius, right = std::abs(point.x - selection_.right) <= radius;
@@ -832,10 +1054,17 @@ void OverlayWindow::beginText(POINT point) {
     if (textEditor_) return;
     textOrigin_ = relativePoint(point);
     POINT client = clientFromDesktop(point);
-    textEditor_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-                                  client.x, client.y, 280, 34, hwnd_, nullptr, instance_, nullptr);
+    textEditor_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+                                  client.x, client.y, scale(280), scale(34),
+                                  hwnd_, nullptr, instance_, nullptr);
     if (textEditor_) {
-        SendMessageW(textEditor_, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+        if (textEditorFont_) DeleteObject(textEditorFont_);
+        textEditorFont_ = CreateFontW(-scale(16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                      L"Segoe UI Variable Text");
+        SendMessageW(textEditor_, WM_SETFONT, reinterpret_cast<WPARAM>(textEditorFont_), TRUE);
         SetWindowSubclass(textEditor_, EditProc, 1, reinterpret_cast<DWORD_PTR>(hwnd_));
         SetFocus(textEditor_);
     }
@@ -850,7 +1079,9 @@ void OverlayWindow::commitText(bool cancel) {
         if (!text.empty()) annotations_.add(TextAnnotation{textOrigin_, std::move(text), AnnotationColors[colorIndex_], 20.0f});
     }
     RemoveWindowSubclass(textEditor_, EditProc, 1); DestroyWindow(textEditor_); textEditor_ = nullptr;
-    SetFocus(hwnd_); InvalidateRect(hwnd_, nullptr, FALSE);
+    if (textEditorFont_) DeleteObject(textEditorFont_);
+    textEditorFont_ = nullptr;
+    SetFocus(hwnd_); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 bool OverlayWindow::perform(OverlayAction action) {
@@ -892,6 +1123,15 @@ void OverlayWindow::releaseBackBuffer() noexcept {
     backBufferHeight_ = 0;
 }
 
+void OverlayWindow::updateUiDpi() {
+    const UINT dpi = DpiForMonitor(uiMonitor_);
+    if (dpi != 0) uiDpi_ = dpi;
+}
+
+int OverlayWindow::scale(int value) const noexcept {
+    return MulDiv(value, static_cast<int>(uiDpi_), 96);
+}
+
 void OverlayWindow::updateCalibrationPreview() {
     preview_ = ColorPipeline::toneMapToSdr(previewSource_, calibration_);
     dimmedPreview_ = DimPreview(preview_, 140);
@@ -926,25 +1166,40 @@ void OverlayWindow::updateMaskedPreview() {
 }
 
 bool OverlayWindow::magnifierVisible() const noexcept {
+    POINT cursor{};
+    if (!GetCursorPos(&cursor) || WindowFromPoint(cursor) != hwnd_) return false;
     return mouseInside_ && mode_ == CaptureMode::Region && tool_ == AnnotationTool::None &&
            hoveredButton_ < 0 && pressedButton_ < 0 && preview_.width > 0 && preview_.height > 0;
 }
 
 RECT OverlayWindow::magnifierRect(POINT clientPoint, const RECT& client) const noexcept {
-    return ToWin32Rect(PlaceMagnifier(clientPoint, FromWin32Rect(client), MagnifierSize, MagnifierSize));
+    const POINT desktop = desktopFromClient(clientPoint);
+    const HMONITOR monitor = MonitorFromPoint(desktop, MONITOR_DEFAULTTONEAREST);
+    const RectI monitorDesktop = MonitorBounds(monitor, frames_.virtualDesktop);
+    const POINT topLeft = clientFromDesktop({monitorDesktop.left, monitorDesktop.top});
+    const POINT bottomRight = clientFromDesktop({monitorDesktop.right, monitorDesktop.bottom});
+    RectI bounds{topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+    bounds = IntersectRectangles(bounds, FromWin32Rect(client));
+    if (bounds.empty()) bounds = FromWin32Rect(client);
+    const int size = scale(MagnifierSize);
+    return ToWin32Rect(PlaceMagnifier(clientPoint, bounds, size, size, scale(20), scale(8)));
 }
 
 void OverlayWindow::drawMagnifier(HDC dc, const RECT& client) const {
     if (!magnifierVisible()) return;
 
     const RECT outer = magnifierRect(mouseClient_, client);
+    const bool highContrast = IsHighContrastEnabled();
     RECT shadow = outer;
-    OffsetRect(&shadow, 2, 3);
-    FillRoundRect(dc, shadow, 13, RGB(13, 13, 14), RGB(13, 13, 14));
-    FillRoundRect(dc, outer, 13, RGB(31, 31, 34), RGB(112, 112, 118));
+    OffsetRect(&shadow, scale(2), scale(3));
+    FillRoundRect(dc, shadow, scale(13), highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(13, 13, 14),
+                  highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(13, 13, 14));
+    FillRoundRect(dc, outer, scale(13), highContrast ? GetSysColor(COLOR_WINDOW) : RGB(31, 31, 34),
+                  highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(112, 112, 118));
 
-    RECT content{outer.left + MagnifierPadding, outer.top + MagnifierPadding,
-                 outer.right - MagnifierPadding, outer.bottom - MagnifierPadding};
+    const int padding = scale(MagnifierPadding);
+    RECT content{outer.left + padding, outer.top + padding,
+                 outer.right - padding, outer.bottom - padding};
     const RectI previewBounds{0, 0, static_cast<int>(preview_.width), static_cast<int>(preview_.height)};
     // Match the same client-to-preview transform used to paint the full-screen image.
     // A round trip through desktop coordinates can lose a pixel on scaled desktops.
@@ -982,7 +1237,8 @@ void OverlayWindow::drawMagnifier(HDC dc, const RECT& client) const {
                   DIB_RGB_COLORS, SRCCOPY);
     if (previousStretchMode != 0) SetStretchBltMode(dc, previousStretchMode);
 
-    HPEN contentOutline = CreatePen(PS_SOLID, 1, RGB(190, 190, 195));
+    HPEN contentOutline = CreatePen(PS_SOLID, std::max(1, scale(1)),
+                                    highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(190, 190, 195));
     const auto previousPen = SelectObject(dc, contentOutline);
     const auto previousBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
     Rectangle(dc, content.left, content.top, content.right, content.bottom);
@@ -993,9 +1249,10 @@ void OverlayWindow::drawMagnifier(HDC dc, const RECT& client) const {
     const int pixelTop = content.top + (sourceY - sourceTop) * (content.bottom - content.top) / sourceHeight;
     const int pixelRight = content.left + (sourceX - sourceLeft + 1) * (content.right - content.left) / sourceWidth;
     const int pixelBottom = content.top + (sourceY - sourceTop + 1) * (content.bottom - content.top) / sourceHeight;
-    HPEN pixelOutline = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+    HPEN pixelOutline = CreatePen(PS_SOLID, std::max(1, scale(2)),
+                                  highContrast ? GetSysColor(COLOR_HIGHLIGHT) : RGB(255, 255, 255));
     SelectObject(dc, pixelOutline);
-    Rectangle(dc, pixelLeft, pixelTop, pixelRight + 1, pixelBottom + 1);
+    Rectangle(dc, pixelLeft, pixelTop, pixelRight + scale(1), pixelBottom + scale(1));
     SelectObject(dc, previousPen);
     SelectObject(dc, previousBrush);
     DeleteObject(pixelOutline);
@@ -1011,6 +1268,7 @@ void OverlayWindow::paint() {
     BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER); info.bmiHeader.biWidth = static_cast<LONG>(preview_.width);
     info.bmiHeader.biHeight = -static_cast<LONG>(preview_.height); info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
     const bool regionMode = mode_ == CaptureMode::Region;
+    const bool highContrast = IsHighContrastEnabled();
     if (regionMode) updateMaskedPreview();
     const ImageBgra8& background = regionMode ? maskedPreview_ : preview_;
     StretchDIBits(dc, 0, 0, client.right, client.bottom, 0, 0, background.width, background.height,
@@ -1026,7 +1284,9 @@ void OverlayWindow::paint() {
             DimOutsideSelection(dc, client, selected, 105, false);
         }
         x = topLeft.x; y = topLeft.y;
-        HPEN border = CreatePen(PS_SOLID, 2, RGB(52, 152, 255)); const auto oldPen = SelectObject(dc, border); const auto oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+        HPEN border = CreatePen(PS_SOLID, std::max(1, scale(2)),
+                                highContrast ? GetSysColor(COLOR_HIGHLIGHT) : RGB(52, 152, 255));
+        const auto oldPen = SelectObject(dc, border); const auto oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
         Rectangle(dc, x, y, bottomRight.x, bottomRight.y); SelectObject(dc, oldBrush); SelectObject(dc, oldPen); DeleteObject(border);
         const auto drawOne = [&](const Annotation& annotation) {
             std::visit([&](const auto& item) {
@@ -1048,84 +1308,20 @@ void OverlayWindow::paint() {
         };
         for (const auto& annotation : annotations_.items()) drawOne(annotation);
         if (draft_) drawOne(*draft_);
-        if (regionMode) DrawSelectionHandles(dc, selected);
+        if (regionMode) DrawSelectionHandles(dc, selected, scale(4), highContrast);
     } else if (!regionMode) AlphaFill(dc, client, 105);
     drawMagnifier(dc, client);
-    rebuildButtons();
-    SetBkMode(dc, TRANSPARENT);
-    HFONT font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                             DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
-    const auto oldFont = SelectObject(dc, font);
 
     const auto drawGroupSurface = [&](const std::vector<Button>& buttons) {
         if (buttons.empty()) return;
-        RECT surface{buttons.front().rect.left - 6, buttons.front().rect.top - 6,
-                     buttons.back().rect.right + 6, buttons.back().rect.bottom + 6};
-        FillRoundRect(dc, surface, 13, RGB(31, 31, 34), RGB(75, 75, 79));
+        RECT surface{buttons.front().rect.left - scale(6), buttons.front().rect.top - scale(6),
+                     buttons.back().rect.right + scale(6), buttons.back().rect.bottom + scale(6)};
+        FillRoundRect(dc, surface, scale(13),
+                      highContrast ? GetSysColor(COLOR_WINDOW) : RGB(31, 31, 34),
+                      highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(75, 75, 79));
     };
     drawGroupSurface(modeButtons_);
     drawGroupSurface(toolButtons_);
-
-    auto drawButtons = [&](const std::vector<Button>& buttons) {
-        for (const auto& button : buttons) {
-            const bool active = (button.id == ModeRegion && mode_ == CaptureMode::Region) ||
-                                (button.id == ModeWindow && mode_ == CaptureMode::Window) ||
-                                (button.id == ModeMonitor && mode_ == CaptureMode::Monitor) ||
-                                (button.id == ModeAll && mode_ == CaptureMode::VirtualDesktop) ||
-                                (button.id == ToolPen && tool_ == AnnotationTool::Pen) ||
-                                 (button.id == ToolRectangle && tool_ == AnnotationTool::Rectangle) ||
-                                 (button.id == ToolArrow && tool_ == AnnotationTool::Arrow) ||
-                                 (button.id == ToolText && tool_ == AnnotationTool::Text);
-            const bool hovered = button.id == hoveredButton_;
-            const bool pressed = button.id == pressedButton_;
-            const bool disabled = (button.id == ToolUndo && !annotations_.canUndo()) ||
-                                  (button.id == ToolRedo && !annotations_.canRedo());
-            const COLORREF background = pressed ? RGB(0, 82, 148)
-                                      : active ? RGB(0, 120, 212)
-                                      : hovered ? RGB(62, 62, 66)
-                                                : RGB(42, 42, 45);
-            const COLORREF outline = active ? RGB(72, 169, 244)
-                                   : hovered ? RGB(92, 92, 97)
-                                             : RGB(42, 42, 45);
-            FillRoundRect(dc, button.rect, 9, background, outline);
-            RECT iconRect = button.rect;
-            if (pressed) OffsetRect(&iconRect, 0, 1);
-            DrawButtonIcon(dc, button.id, iconRect,
-                           disabled ? RGB(125, 125, 130) : RGB(250, 250, 250),
-                           AnnotationColors[colorIndex_],
-                           static_cast<int>(AnnotationWidths[lineWidthIndex_]));
-        }
-    };
-    drawButtons(modeButtons_);
-    drawButtons(toolButtons_);
-
-    const Button* tooltipButton = nullptr;
-    for (const auto& button : modeButtons_) if (button.id == hoveredButton_) tooltipButton = &button;
-    for (const auto& button : toolButtons_) if (button.id == hoveredButton_) tooltipButton = &button;
-    if (tooltipButton) {
-        const auto label = Localized(tooltipButton->label, language_);
-        SIZE size{};
-        GetTextExtentPoint32W(dc, label.data(), static_cast<int>(label.size()), &size);
-        const int tooltipWidth = size.cx + 20;
-        const int tooltipHeight = 30;
-        int tooltipX = (tooltipButton->rect.left + tooltipButton->rect.right - tooltipWidth) / 2;
-        tooltipX = std::clamp(tooltipX, 8, std::max(8, static_cast<int>(client.right) - tooltipWidth - 8));
-        int tooltipY = tooltipButton->id < ToolPen ? tooltipButton->rect.bottom + 10
-                                                   : tooltipButton->rect.top - tooltipHeight - 10;
-        if (tooltipY < 8) tooltipY = tooltipButton->rect.bottom + 10;
-        if (tooltipY + tooltipHeight > client.bottom - 8) tooltipY = tooltipButton->rect.top - tooltipHeight - 10;
-        RECT shadow{tooltipX + 2, tooltipY + 3, tooltipX + tooltipWidth + 2, tooltipY + tooltipHeight + 3};
-        FillRoundRect(dc, shadow, 7, RGB(15, 15, 16), RGB(15, 15, 16));
-        RECT tooltip{tooltipX, tooltipY, tooltipX + tooltipWidth, tooltipY + tooltipHeight};
-        FillRoundRect(dc, tooltip, 7, RGB(46, 46, 49), RGB(88, 88, 92));
-        SetTextColor(dc, RGB(255, 255, 255));
-        DrawTextW(dc, label.data(), static_cast<int>(label.size()), &tooltip,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    }
-
-    SelectObject(dc, oldFont);
-    DeleteObject(font);
     if (buffered) {
         if (savedBufferState != 0) RestoreDC(dc, savedBufferState);
         BitBlt(windowDc, ps.rcPaint.left, ps.rcPaint.top,

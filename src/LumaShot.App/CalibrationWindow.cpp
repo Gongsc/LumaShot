@@ -2,6 +2,9 @@
 #include "resource.h"
 #include <LumaShot/Geometry.h>
 #include <algorithm>
+#include <commctrl.h>
+#include <shellscalingapi.h>
+#include <uxtheme.h>
 #include <utility>
 #include <windowsx.h>
 
@@ -14,28 +17,31 @@ constexpr int HighlightCompression = 402;
 constexpr int Reset = 403;
 constexpr int Apply = 404;
 constexpr int Cancel = 405;
+constexpr int OutputLabel = 406;
+constexpr int CompressionLabel = 407;
+constexpr int OutputValue = 408;
+constexpr int CompressionValue = 409;
 
 POINT PointFromLParam(LPARAM value) { return {GET_X_LPARAM(value), GET_Y_LPARAM(value)}; }
 bool PointIn(const RECT& rect, POINT point) { return PtInRect(&rect, point) != FALSE; }
 
-void FillRoundRect(HDC dc, const RECT& rect, int radius, COLORREF fill, COLORREF outline) {
-    HBRUSH brush = CreateSolidBrush(fill);
-    HPEN pen = CreatePen(PS_SOLID, 1, outline);
-    const auto oldBrush = SelectObject(dc, brush);
-    const auto oldPen = SelectObject(dc, pen);
-    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
-    SelectObject(dc, oldPen);
-    SelectObject(dc, oldBrush);
-    DeleteObject(pen);
-    DeleteObject(brush);
+bool IsHighContrastEnabled() noexcept {
+    HIGHCONTRASTW value{sizeof(value)};
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0) &&
+           (value.dwFlags & HCF_HIGHCONTRASTON) != 0;
 }
 
-void AlphaFill(HDC target, const RECT& rect, BYTE alpha) {
+UINT DpiForMonitor(HMONITOR monitor) noexcept {
+    UINT x{96}, y{96};
+    return monitor && SUCCEEDED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &x, &y)) ? x : 96;
+}
+
+void AlphaFill(HDC target, const RECT& rect, BYTE alpha, COLORREF color) {
     if (rect.right <= rect.left || rect.bottom <= rect.top) return;
     HDC source = CreateCompatibleDC(target);
     HBITMAP bitmap = CreateCompatibleBitmap(target, 1, 1);
     const auto old = SelectObject(source, bitmap);
-    SetPixel(source, 0, 0, RGB(20, 20, 23));
+    SetPixel(source, 0, 0, color);
     BLENDFUNCTION blend{AC_SRC_OVER, 0, alpha, 0};
     AlphaBlend(target, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
                source, 0, 0, 1, 1, blend);
@@ -44,17 +50,18 @@ void AlphaFill(HDC target, const RECT& rect, BYTE alpha) {
     DeleteDC(source);
 }
 
-void FillTranslucentPanel(HDC dc, const RECT& rect, BYTE alpha, COLORREF outline) {
+void FillTranslucentPanel(HDC dc, const RECT& rect, BYTE alpha, COLORREF fill, COLORREF outline,
+                          int radius) {
     const int saved = SaveDC(dc);
-    HRGN clip = CreateRoundRectRgn(rect.left, rect.top, rect.right + 1, rect.bottom + 1, 22, 22);
+    HRGN clip = CreateRoundRectRgn(rect.left, rect.top, rect.right + 1, rect.bottom + 1, radius, radius);
     SelectClipRgn(dc, clip);
-    AlphaFill(dc, rect, alpha);
+    AlphaFill(dc, rect, alpha, fill);
     RestoreDC(dc, saved);
     DeleteObject(clip);
     HPEN border = CreatePen(PS_SOLID, 1, outline);
     const auto oldPen = SelectObject(dc, border);
     const auto oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
-    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, 22, 22);
+    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
     SelectObject(dc, oldBrush);
     SelectObject(dc, oldPen);
     DeleteObject(border);
@@ -68,6 +75,7 @@ CalibrationWindow::CalibrationWindow(HINSTANCE instance, CaptureFrameSet frames,
     POINT cursor{};
     GetCursorPos(&cursor);
     uiMonitor_ = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+    uiDpi_ = DpiForMonitor(uiMonitor_);
     previewSource_ = ColorPipeline::compose(frames_, frames_.virtualDesktop);
     frames_.monitors.clear();
     frames_.monitors.shrink_to_fit();
@@ -75,6 +83,8 @@ CalibrationWindow::CalibrationWindow(HINSTANCE instance, CaptureFrameSet frames,
 }
 
 bool CalibrationWindow::run() {
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES | ICC_STANDARD_CLASSES};
+    InitCommonControlsEx(&controls);
     WNDCLASSEXW cls{sizeof(cls)};
     cls.hInstance = instance_;
     cls.lpfnWndProc = WindowProc;
@@ -84,23 +94,97 @@ bool CalibrationWindow::run() {
     cls.hIcon = LoadIconW(instance_, MAKEINTRESOURCEW(IDI_LUMASHOT));
     RegisterClassExW(&cls);
     const RectI bounds = frames_.virtualDesktop;
-    hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, ClassName,
-                            Localized(StringId::HdrCalibrationTitle, language_).data(), WS_POPUP,
+    hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT, ClassName,
+                            Localized(StringId::HdrCalibrationTitle, language_).data(), WS_POPUP | WS_CLIPCHILDREN,
                             bounds.left, bounds.top, bounds.width(), bounds.height(),
                             nullptr, nullptr, instance_, this);
     if (!hwnd_) return false;
     SetWindowDisplayAffinity(hwnd_, WDA_EXCLUDEFROMCAPTURE);
+    createControls();
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
     SetFocus(hwnd_);
     layoutPanel(true);
     MSG message{};
     while (!finished_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        bool handled = false;
+        if (message.message == WM_KEYDOWN && message.wParam == VK_ESCAPE) {
+            SendMessageW(hwnd_, WM_KEYDOWN, message.wParam, message.lParam);
+            handled = true;
+        } else if (message.message == WM_KEYDOWN && message.wParam == VK_RETURN) {
+            const int focusedId = GetDlgCtrlID(GetFocus());
+            if (focusedId == Reset || focusedId == Apply || focusedId == Cancel) {
+                SendMessageW(GetFocus(), BM_CLICK, 0, 0);
+                handled = true;
+            } else {
+                SendMessageW(hwnd_, WM_KEYDOWN, message.wParam, message.lParam);
+                handled = true;
+            }
+        }
+        if (!handled && !IsDialogMessageW(hwnd_, &message)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
     }
     if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
     return accepted_;
+}
+
+void CalibrationWindow::createControls() {
+    const auto add = [&](const wchar_t* cls, const wchar_t* text, DWORD style, int id) {
+        return CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+                               0, 0, 1, 1, hwnd_,
+                               reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance_, nullptr);
+    };
+    const auto outputLabel = Localized(StringId::HdrOutputBrightness, language_);
+    const auto compressionLabel = Localized(StringId::HdrHighlightCompression, language_);
+    add(L"STATIC", outputLabel.data(), SS_LEFT, OutputLabel);
+    add(L"STATIC", compressionLabel.data(), SS_LEFT, CompressionLabel);
+    add(L"STATIC", L"", SS_RIGHT, OutputValue);
+    add(L"STATIC", L"", SS_RIGHT, CompressionValue);
+    HWND output = add(TRACKBAR_CLASSW, outputLabel.data(), TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,
+                      OutputBrightness);
+    HWND compression = add(TRACKBAR_CLASSW, compressionLabel.data(), TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,
+                           HighlightCompression);
+    SendMessageW(output, TBM_SETRANGE, TRUE,
+                 MAKELPARAM(HdrCalibration::MinimumOutputBrightness, HdrCalibration::MaximumOutputBrightness));
+    SendMessageW(compression, TBM_SETRANGE, TRUE,
+                 MAKELPARAM(HdrCalibration::MinimumHighlightCompression, HdrCalibration::MaximumHighlightCompression));
+    SendMessageW(output, TBM_SETLINESIZE, 0, 1);
+    SendMessageW(compression, TBM_SETLINESIZE, 0, 1);
+    add(L"BUTTON", Localized(StringId::ResetCalibration, language_).data(), BS_PUSHBUTTON | WS_TABSTOP, Reset);
+    add(L"BUTTON", Localized(StringId::Cancel, language_).data(), BS_PUSHBUTTON | WS_TABSTOP, Cancel);
+    add(L"BUTTON", Localized(StringId::Apply, language_).data(), BS_DEFPUSHBUTTON | WS_TABSTOP, Apply);
+
+    if (controlFont_) DeleteObject(controlFont_);
+    controlFont_ = CreateFontW(-scale(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                               CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                               L"Segoe UI Variable Text");
+    for (HWND child = GetWindow(hwnd_, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+        SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(controlFont_), TRUE);
+    refreshControlTheme();
+    updateControlValues();
+}
+
+void CalibrationWindow::refreshControlTheme() {
+    const bool highContrast = IsHighContrastEnabled();
+    for (HWND child = GetWindow(hwnd_, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+        SetWindowTheme(child, highContrast ? nullptr : L"DarkMode_Explorer", nullptr);
+    RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+}
+
+void CalibrationWindow::updateControlValues() {
+    if (!hwnd_) return;
+    SendDlgItemMessageW(hwnd_, OutputBrightness, TBM_SETPOS, TRUE,
+                        calibration_.outputBrightnessPercent);
+    SendDlgItemMessageW(hwnd_, HighlightCompression, TBM_SETPOS, TRUE,
+                        calibration_.highlightCompressionPercent);
+    wchar_t value[16]{};
+    swprintf_s(value, L"%d%%", calibration_.outputBrightnessPercent);
+    SetDlgItemTextW(hwnd_, OutputValue, value);
+    swprintf_s(value, L"%d%%", calibration_.highlightCompressionPercent);
+    SetDlgItemTextW(hwnd_, CompressionValue, value);
 }
 
 LRESULT CALLBACK CalibrationWindow::WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -121,6 +205,36 @@ LRESULT CalibrationWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lpa
     case WM_PAINT:
         paint();
         return 0;
+    case WM_COMMAND:
+        if (HIWORD(wparam) == BN_CLICKED &&
+            (LOWORD(wparam) == Reset || LOWORD(wparam) == Apply || LOWORD(wparam) == Cancel)) {
+            activateControl(LOWORD(wparam));
+            return 0;
+        }
+        break;
+    case WM_HSCROLL: {
+        const HWND control = reinterpret_cast<HWND>(lparam);
+        const int id = control ? GetDlgCtrlID(control) : 0;
+        if (id == OutputBrightness || id == HighlightCompression) {
+            const int value = static_cast<int>(SendMessageW(control, TBM_GETPOS, 0, 0));
+            if (id == OutputBrightness) calibration_.outputBrightnessPercent = value;
+            else calibration_.highlightCompressionPercent = value;
+            updatePreview();
+            return 0;
+        }
+        break;
+    }
+    case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+    case WM_SYSCOLORCHANGE:
+        refreshControlTheme();
+        return 0;
+    case WM_CTLCOLORSTATIC: {
+        HDC dc = reinterpret_cast<HDC>(wparam);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, IsHighContrastEnabled() ? GetSysColor(COLOR_WINDOWTEXT) : RGB(225, 225, 230));
+        return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
+    }
     case WM_SETCURSOR:
         SetCursor(LoadCursorW(nullptr, hoveredControl_ == PanelSurface ? IDC_SIZEALL
                                          : hoveredControl_ >= 0 ? IDC_HAND : IDC_ARROW));
@@ -139,10 +253,11 @@ LRESULT CalibrationWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lpa
             GetClientRect(hwnd_, &client);
             panelRect_ = dragInitialPanel_;
             OffsetRect(&panelRect_, point.x - dragStart_.x, point.y - dragStart_.y);
-            const int dx = panelRect_.left < 12 ? 12 - panelRect_.left
-                         : panelRect_.right > client.right - 12 ? client.right - 12 - panelRect_.right : 0;
-            const int dy = panelRect_.top < 12 ? 12 - panelRect_.top
-                         : panelRect_.bottom > client.bottom - 12 ? client.bottom - 12 - panelRect_.bottom : 0;
+            const int margin = scale(12);
+            const int dx = panelRect_.left < margin ? margin - panelRect_.left
+                         : panelRect_.right > client.right - margin ? client.right - margin - panelRect_.right : 0;
+            const int dy = panelRect_.top < margin ? margin - panelRect_.top
+                         : panelRect_.bottom > client.bottom - margin ? client.bottom - margin - panelRect_.bottom : 0;
             OffsetRect(&panelRect_, dx, dy);
             updatePanelControls();
             InvalidateRect(hwnd_, nullptr, FALSE);
@@ -177,6 +292,7 @@ LRESULT CalibrationWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lpa
     case WM_LBUTTONUP: {
         if (pressedControl_ < 0) return 0;
         const int pressed = pressedControl_;
+        const bool panelWasDragging = draggingPanel_;
         const POINT point = PointFromLParam(lparam);
         if (pressed == OutputBrightness || pressed == HighlightCompression)
             setCalibrationFromPoint(pressed, point.x);
@@ -184,6 +300,7 @@ LRESULT CalibrationWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lpa
         pressedControl_ = -1;
         draggingPanel_ = false;
         if (GetCapture() == hwnd_) ReleaseCapture();
+        if (panelWasDragging) updatePanelDpi();
         if (activate && pressed != OutputBrightness && pressed != HighlightCompression)
             activateControl(pressed);
         if (hwnd_) InvalidateRect(hwnd_, &panelRect_, FALSE);
@@ -203,18 +320,21 @@ LRESULT CalibrationWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lpa
         return 0;
     case WM_DESTROY:
         releaseBackBuffer();
+        if (controlFont_) DeleteObject(controlFont_);
+        controlFont_ = nullptr;
         hwnd_ = nullptr;
         return 0;
     default:
         return DefWindowProcW(hwnd_, message, wparam, lparam);
     }
+    return DefWindowProcW(hwnd_, message, wparam, lparam);
 }
 
 void CalibrationWindow::layoutPanel(bool resetPosition) {
     RECT client{};
     GetClientRect(hwnd_, &client);
-    constexpr int panelWidth = 420;
-    constexpr int panelHeight = 224;
+    const int panelWidth = scale(420);
+    const int panelHeight = scale(224);
     if (resetPosition || IsRectEmpty(&panelRect_)) {
         MONITORINFO monitor{sizeof(monitor)};
         if (!GetMonitorInfoW(uiMonitor_, &monitor)) monitor.rcWork = ToWin32Rect(frames_.virtualDesktop);
@@ -222,29 +342,74 @@ void CalibrationWindow::layoutPanel(bool resetPosition) {
         const int monitorTop = monitor.rcWork.top - frames_.virtualDesktop.top;
         const int monitorRight = monitor.rcWork.right - frames_.virtualDesktop.left;
         const int monitorBottom = monitor.rcWork.bottom - frames_.virtualDesktop.top;
-        const int x = std::clamp(monitorRight - panelWidth - 32, monitorLeft + 12,
-                                 std::max(monitorLeft + 12, monitorRight - panelWidth - 12));
+        const int x = std::clamp(monitorRight - panelWidth - scale(32), monitorLeft + scale(12),
+                                 std::max(monitorLeft + scale(12), monitorRight - panelWidth - scale(12)));
         const int y = std::clamp(monitorTop + (monitorBottom - monitorTop - panelHeight) / 2,
-                                 monitorTop + 12, std::max(monitorTop + 12, monitorBottom - panelHeight - 12));
+                                 monitorTop + scale(12),
+                                 std::max(monitorTop + scale(12), monitorBottom - panelHeight - scale(12)));
         panelRect_ = {x, y, x + panelWidth, y + panelHeight};
     } else {
-        const int dx = panelRect_.left < 12 ? 12 - panelRect_.left
-                     : panelRect_.right > client.right - 12 ? client.right - 12 - panelRect_.right : 0;
-        const int dy = panelRect_.top < 12 ? 12 - panelRect_.top
-                     : panelRect_.bottom > client.bottom - 12 ? client.bottom - 12 - panelRect_.bottom : 0;
+        const int margin = scale(12);
+        const int dx = panelRect_.left < margin ? margin - panelRect_.left
+                     : panelRect_.right > client.right - margin ? client.right - margin - panelRect_.right : 0;
+        const int dy = panelRect_.top < margin ? margin - panelRect_.top
+                     : panelRect_.bottom > client.bottom - margin ? client.bottom - margin - panelRect_.bottom : 0;
         OffsetRect(&panelRect_, dx, dy);
     }
     updatePanelControls();
 }
 
+void CalibrationWindow::updatePanelDpi() {
+    RECT client{};
+    GetClientRect(hwnd_, &client);
+    const POINT center{(panelRect_.left + panelRect_.right) / 2,
+                       (panelRect_.top + panelRect_.bottom) / 2};
+    const POINT desktop = MapPointBetweenRects(center, FromWin32Rect(client), frames_.virtualDesktop);
+    const HMONITOR monitor = MonitorFromPoint(desktop, MONITOR_DEFAULTTONEAREST);
+    const UINT dpi = DpiForMonitor(monitor);
+    if (!monitor || dpi == 0 || (monitor == uiMonitor_ && dpi == uiDpi_)) return;
+
+    uiMonitor_ = monitor;
+    uiDpi_ = dpi;
+    const int width = scale(420);
+    const int height = scale(224);
+    panelRect_ = {center.x - width / 2, center.y - height / 2,
+                  center.x - width / 2 + width, center.y - height / 2 + height};
+
+    if (controlFont_) DeleteObject(controlFont_);
+    controlFont_ = CreateFontW(-scale(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                               CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                               L"Segoe UI Variable Text");
+    for (HWND child = GetWindow(hwnd_, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+        SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(controlFont_), TRUE);
+    layoutPanel(false);
+}
+
 void CalibrationWindow::updatePanelControls() {
     const int left = panelRect_.left;
     const int top = panelRect_.top;
-    resetRect_ = {panelRect_.right - 92, top + 12, panelRect_.right - 16, top + 42};
-    outputSliderRect_ = {left + 20, top + 88, panelRect_.right - 20, top + 108};
-    compressionSliderRect_ = {left + 20, top + 137, panelRect_.right - 20, top + 157};
-    cancelRect_ = {panelRect_.right - 204, panelRect_.bottom - 48, panelRect_.right - 112, panelRect_.bottom - 14};
-    applyRect_ = {panelRect_.right - 104, panelRect_.bottom - 48, panelRect_.right - 16, panelRect_.bottom - 14};
+    resetRect_ = {panelRect_.right - scale(92), top + scale(12), panelRect_.right - scale(16), top + scale(42)};
+    outputSliderRect_ = {left + scale(20), top + scale(84), panelRect_.right - scale(20), top + scale(114)};
+    compressionSliderRect_ = {left + scale(20), top + scale(132), panelRect_.right - scale(20), top + scale(162)};
+    cancelRect_ = {panelRect_.right - scale(204), panelRect_.bottom - scale(48),
+                   panelRect_.right - scale(112), panelRect_.bottom - scale(14)};
+    applyRect_ = {panelRect_.right - scale(104), panelRect_.bottom - scale(48),
+                  panelRect_.right - scale(16), panelRect_.bottom - scale(14)};
+
+    const auto move = [&](int id, const RECT& rect) {
+        if (HWND control = GetDlgItem(hwnd_, id))
+            MoveWindow(control, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, TRUE);
+    };
+    move(Reset, resetRect_);
+    move(OutputBrightness, outputSliderRect_);
+    move(HighlightCompression, compressionSliderRect_);
+    move(Cancel, cancelRect_);
+    move(Apply, applyRect_);
+    move(OutputLabel, {left + scale(20), top + scale(65), panelRect_.right - scale(90), top + scale(85)});
+    move(OutputValue, {panelRect_.right - scale(86), top + scale(65), panelRect_.right - scale(20), top + scale(85)});
+    move(CompressionLabel, {left + scale(20), top + scale(113), panelRect_.right - scale(90), top + scale(133)});
+    move(CompressionValue, {panelRect_.right - scale(86), top + scale(113), panelRect_.right - scale(20), top + scale(133)});
 }
 
 int CalibrationWindow::controlAt(POINT point) const noexcept {
@@ -290,7 +455,10 @@ void CalibrationWindow::setCalibrationFromPoint(int id, int x) {
 
 void CalibrationWindow::updatePreview() {
     preview_ = ColorPipeline::toneMapToSdr(previewSource_, calibration_);
-    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    if (hwnd_) {
+        updateControlValues();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
 }
 
 void CalibrationWindow::paint() {
@@ -312,81 +480,34 @@ void CalibrationWindow::paint() {
                   preview_.pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
 
     layoutPanel(false);
+    const bool highContrast = IsHighContrastEnabled();
     RECT shadow = panelRect_;
-    OffsetRect(&shadow, 3, 5);
-    FillTranslucentPanel(dc, shadow, 90, RGB(25, 25, 28));
-    FillTranslucentPanel(dc, panelRect_, 205, RGB(105, 105, 112));
+    OffsetRect(&shadow, scale(3), scale(5));
+    if (!highContrast)
+        FillTranslucentPanel(dc, shadow, 90, RGB(20, 20, 23), RGB(25, 25, 28), scale(22));
+    FillTranslucentPanel(dc, panelRect_, highContrast ? 255 : 205,
+                         highContrast ? GetSysColor(COLOR_WINDOW) : RGB(20, 20, 23),
+                         highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(105, 105, 112), scale(22));
     SetBkMode(dc, TRANSPARENT);
-    HFONT titleFont = CreateFontW(-18, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+    HFONT titleFont = CreateFontW(-scale(18), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                   OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                   DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Display");
-    HFONT bodyFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                                 DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
     const auto oldFont = SelectObject(dc, titleFont);
-    SetTextColor(dc, RGB(255, 255, 255));
-    RECT title{panelRect_.left + 18, panelRect_.top + 10, resetRect_.left - 8, panelRect_.top + 39};
+    SetTextColor(dc, highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(255, 255, 255));
+    RECT title{panelRect_.left + scale(18), panelRect_.top + scale(10),
+               resetRect_.left - scale(8), panelRect_.top + scale(39)};
     const auto titleText = Localized(StringId::HdrCalibrationTitle, language_);
     DrawTextW(dc, titleText.data(), static_cast<int>(titleText.size()), &title,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    SelectObject(dc, bodyFont);
-    SetTextColor(dc, RGB(205, 205, 210));
-    RECT hint{panelRect_.left + 18, panelRect_.top + 40, panelRect_.right - 18, panelRect_.top + 64};
+    SelectObject(dc, controlFont_);
+    SetTextColor(dc, highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(205, 205, 210));
+    RECT hint{panelRect_.left + scale(18), panelRect_.top + scale(40),
+              panelRect_.right - scale(18), panelRect_.top + scale(64)};
     const auto hintText = Localized(StringId::CalibrationInstructions, language_);
     DrawTextW(dc, hintText.data(), static_cast<int>(hintText.size()), &hint,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
-    const auto drawButton = [&](const RECT& rect, int id, StringId label, bool primary) {
-        const bool hovered = hoveredControl_ == id;
-        const bool pressed = pressedControl_ == id;
-        const COLORREF fill = primary ? (pressed ? RGB(0, 82, 148) : hovered ? RGB(16, 110, 190) : RGB(0, 120, 212))
-                                      : (pressed ? RGB(56, 56, 61) : hovered ? RGB(66, 66, 72) : RGB(43, 43, 48));
-        FillRoundRect(dc, rect, 8, fill, primary ? fill : RGB(92, 92, 98));
-        SetTextColor(dc, RGB(255, 255, 255));
-        const auto text = Localized(label, language_);
-        RECT textBounds = rect;
-        DrawTextW(dc, text.data(), static_cast<int>(text.size()), &textBounds,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    };
-    drawButton(resetRect_, Reset, StringId::ResetCalibration, false);
-    drawButton(cancelRect_, Cancel, StringId::Cancel, false);
-    drawButton(applyRect_, Apply, StringId::Apply, true);
-
-    const auto drawSlider = [&](int id, StringId labelId, const RECT& slider, int minimum, int maximum) {
-        RECT label{slider.left, slider.top - 22, slider.right, slider.top - 2};
-        const auto labelText = Localized(labelId, language_);
-        SetTextColor(dc, RGB(225, 225, 230));
-        DrawTextW(dc, labelText.data(), static_cast<int>(labelText.size()), &label,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        wchar_t value[16]{};
-        swprintf_s(value, L"%d%%", calibrationValue(id));
-        SetTextColor(dc, RGB(255, 255, 255));
-        DrawTextW(dc, value, -1, &label, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        const int centerY = (slider.top + slider.bottom) / 2;
-        RECT track{slider.left, centerY - 2, slider.right, centerY + 2};
-        FillRoundRect(dc, track, 4, RGB(84, 84, 90), RGB(84, 84, 90));
-        const int thumbX = slider.left + MulDiv(calibrationValue(id) - minimum,
-                                                slider.right - slider.left, maximum - minimum);
-        RECT active{slider.left, centerY - 2, thumbX, centerY + 2};
-        if (active.right > active.left) FillRoundRect(dc, active, 4, RGB(52, 152, 255), RGB(52, 152, 255));
-        HBRUSH thumb = CreateSolidBrush(RGB(250, 250, 252));
-        HPEN thumbPen = CreatePen(PS_SOLID, 2, RGB(0, 120, 212));
-        const auto oldBrush = SelectObject(dc, thumb);
-        const auto oldPen = SelectObject(dc, thumbPen);
-        const int radius = hoveredControl_ == id || pressedControl_ == id ? 8 : 7;
-        Ellipse(dc, thumbX - radius, centerY - radius, thumbX + radius + 1, centerY + radius + 1);
-        SelectObject(dc, oldPen);
-        SelectObject(dc, oldBrush);
-        DeleteObject(thumbPen);
-        DeleteObject(thumb);
-    };
-    drawSlider(OutputBrightness, StringId::HdrOutputBrightness, outputSliderRect_,
-               HdrCalibration::MinimumOutputBrightness, HdrCalibration::MaximumOutputBrightness);
-    drawSlider(HighlightCompression, StringId::HdrHighlightCompression, compressionSliderRect_,
-               HdrCalibration::MinimumHighlightCompression, HdrCalibration::MaximumHighlightCompression);
-
     SelectObject(dc, oldFont);
-    DeleteObject(bodyFont);
     DeleteObject(titleFont);
     if (buffered) BitBlt(windowDc, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
     EndPaint(hwnd_, &ps);
@@ -428,6 +549,10 @@ void CalibrationWindow::finish(bool accepted) {
     if (!accepted) calibration_ = initialCalibration_;
     finished_ = true;
     if (hwnd_) DestroyWindow(hwnd_);
+}
+
+int CalibrationWindow::scale(int value) const noexcept {
+    return MulDiv(value, static_cast<int>(uiDpi_), 96);
 }
 
 } // namespace lumashot

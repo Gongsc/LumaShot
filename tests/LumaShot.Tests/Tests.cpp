@@ -13,7 +13,9 @@
 #include <cmath>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 
@@ -150,6 +152,14 @@ void ColorTests() {
         const float decoded = ColorPipeline::halfToFloat(ColorPipeline::floatToHalf(value));
         Check(std::abs(decoded - value) < std::max(0.001f, value * 0.001f), "half float round trip");
     }
+    Check(ColorPipeline::floatToHalf(1.9996f) == 0x4000u &&
+          ColorPipeline::floatToHalf(-1.9996f) == 0xc000u,
+          "carries half-float mantissa rounding into the exponent");
+    Check(std::isnan(ColorPipeline::halfToFloat(ColorPipeline::floatToHalf(
+              std::numeric_limits<float>::quiet_NaN()))) &&
+          std::isinf(ColorPipeline::halfToFloat(ColorPipeline::floatToHalf(
+              std::numeric_limits<float>::infinity()))),
+          "preserves half-float NaN and infinity classes");
     ImageF16 ramp;
     ramp.width = 7; ramp.height = 1; ramp.hdr = true;
     ramp.maxLuminanceNits = 2000.0f; ramp.sdrWhiteLevelNits = 240.0f;
@@ -253,6 +263,31 @@ void CodecTests(const std::filesystem::path& base) {
           v5->bV5Height == -static_cast<LONG>(sdr.height) && v5->bV5CSType == LCS_sRGB, "builds top-down sRGB CF_DIBV5 payload");
     Check(clipboard.dib.size() == sizeof(BITMAPINFOHEADER) + sdr.pixels.size() && dib->biSize == sizeof(BITMAPINFOHEADER) &&
           dib->biHeight == static_cast<LONG>(sdr.height), "builds bottom-up CF_DIB payload");
+
+    const auto existing = base / L"existing.png";
+    {
+        std::ofstream original(existing, std::ios::binary | std::ios::trunc);
+        original << "keep-original";
+    }
+    ImageBgra8 invalid{2, 2};
+    bool failed = false;
+    try { ImageExporter::savePng(existing, invalid); } catch (...) { failed = true; }
+    std::ifstream preserved(existing, std::ios::binary);
+    const std::string preservedBytes{std::istreambuf_iterator<char>(preserved),
+                                     std::istreambuf_iterator<char>()};
+    Check(failed && preservedBytes == "keep-original",
+          "preserves an existing destination when image encoding fails");
+    preserved.close();
+    ImageExporter::savePng(existing, sdr);
+    std::ifstream replaced(existing, std::ios::binary);
+    char signature[4]{};
+    replaced.read(signature, sizeof(signature));
+    Check(replaced.gcount() == sizeof(signature) &&
+          static_cast<unsigned char>(signature[0]) == 0x89 &&
+          signature[1] == 'P' && signature[2] == 'N' && signature[3] == 'G',
+          "atomically replaces an existing destination after encoding succeeds");
+    replaced.close();
+    std::filesystem::remove(existing);
 }
 }
 

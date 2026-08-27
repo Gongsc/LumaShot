@@ -46,6 +46,12 @@ bool IsSystemDarkMode() {
     return value == 0;
 }
 
+bool IsHighContrastEnabled() noexcept {
+    HIGHCONTRASTW value{sizeof(value)};
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0) &&
+           (value.dwFlags & HCF_HIGHCONTRASTON) != 0;
+}
+
 HWND AddControl(HWND parent, DWORD exStyle, const wchar_t* cls, const wchar_t* text, DWORD style,
                 int id, HINSTANCE instance) {
     return CreateWindowExW(exStyle, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1, parent,
@@ -78,8 +84,10 @@ std::wstring HotkeyText(HWND control) {
     if (flags & HOTKEYF_SHIFT) append(L"Shift");
     if (flags & HOTKEYF_ALT) append(L"Alt");
     wchar_t keyName[64]{};
-    const UINT scanCode = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
-    if (GetKeyNameTextW(static_cast<LONG>(scanCode << 16), keyName, ARRAYSIZE(keyName)) > 0) append(keyName);
+    const UINT scanCode = MapVirtualKeyW(key, MAPVK_VK_TO_VSC_EX);
+    LONG keyData = static_cast<LONG>((scanCode & 0xffu) << 16);
+    if ((scanCode & 0xff00u) != 0) keyData |= 1 << 24;
+    if (GetKeyNameTextW(keyData, keyName, ARRAYSIZE(keyName)) > 0) append(keyName);
     else {
         wchar_t fallback[16]{};
         swprintf_s(fallback, L"0x%02X", key);
@@ -279,20 +287,22 @@ LRESULT SettingsWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam
         return 0;
     }
     case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+    case WM_SYSCOLORCHANGE:
         refreshTheme();
         return 0;
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLORBTN: {
         HDC dc = reinterpret_cast<HDC>(wparam);
         SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, dark_ ? DarkText : LightText);
+        SetTextColor(dc, highContrast_ ? GetSysColor(COLOR_WINDOWTEXT) : dark_ ? DarkText : LightText);
         return reinterpret_cast<LRESULT>(cardBrush_);
     }
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX: {
         HDC dc = reinterpret_cast<HDC>(wparam);
-        SetBkColor(dc, dark_ ? DarkInput : LightInput);
-        SetTextColor(dc, dark_ ? DarkText : LightText);
+        SetBkColor(dc, highContrast_ ? GetSysColor(COLOR_WINDOW) : dark_ ? DarkInput : LightInput);
+        SetTextColor(dc, highContrast_ ? GetSysColor(COLOR_WINDOWTEXT) : dark_ ? DarkText : LightText);
         return reinterpret_cast<LRESULT>(inputBrush_);
     }
     case WM_MEASUREITEM:
@@ -399,10 +409,10 @@ void SettingsWindow::createControls() {
     for (HWND control : {languageText, language, hotkeyText, hotkey, cursorBox, copyOnEnterBox, startupBox,
                          calibrationButton, saveButton, cancelButton}) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
-        SetWindowTheme(control, dark_ ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        SetWindowTheme(control, highContrast_ ? nullptr : dark_ ? L"DarkMode_Explorer" : L"Explorer", nullptr);
     }
-    SetWindowTheme(language, L"", nullptr);
-    SetWindowTheme(hotkey, L"", nullptr);
+    SetWindowTheme(language, highContrast_ ? nullptr : L"", nullptr);
+    SetWindowTheme(hotkey, highContrast_ ? nullptr : L"", nullptr);
 }
 
 void SettingsWindow::layoutControls() {
@@ -440,8 +450,8 @@ void SettingsWindow::paint() {
     const auto oldBitmap = SelectObject(dc, bitmap);
     FillRect(dc, &client, backgroundBrush_);
 
-    const COLORREF card = dark_ ? DarkCard : LightCard;
-    const COLORREF border = dark_ ? DarkBorder : LightBorder;
+    const COLORREF card = highContrast_ ? GetSysColor(COLOR_WINDOW) : dark_ ? DarkCard : LightCard;
+    const COLORREF border = highContrast_ ? GetSysColor(COLOR_WINDOWTEXT) : dark_ ? DarkBorder : LightBorder;
     FillRoundedRect(dc, {scale(24), scale(88), client.right - scale(24), scale(218)},
                     scale(12), card, border);
     FillRoundedRect(dc, {scale(24), scale(230), client.right - scale(24), scale(348)},
@@ -450,7 +460,7 @@ void SettingsWindow::paint() {
                     scale(12), card, border);
 
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, dark_ ? DarkText : LightText);
+    SetTextColor(dc, highContrast_ ? GetSysColor(COLOR_WINDOWTEXT) : dark_ ? DarkText : LightText);
     auto oldFont = SelectObject(dc, titleFont_);
     RECT title{scale(28), scale(18), client.right - scale(28), scale(57)};
     const auto titleText = Localized(StringId::Settings, displayLanguage_);
@@ -458,14 +468,14 @@ void SettingsWindow::paint() {
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     SelectObject(dc, bodyFont_);
-    SetTextColor(dc, dark_ ? DarkSecondaryText : LightSecondaryText);
+    SetTextColor(dc, highContrast_ ? GetSysColor(COLOR_WINDOWTEXT) : dark_ ? DarkSecondaryText : LightSecondaryText);
     RECT subtitle{scale(28), scale(53), client.right - scale(28), scale(78)};
     const auto subtitleText = Localized(StringId::SettingsSubtitle, displayLanguage_);
     DrawTextW(dc, subtitleText.data(), static_cast<int>(subtitleText.size()), &subtitle,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     SelectObject(dc, captionFont_);
-    SetTextColor(dc, dark_ ? DarkSecondaryText : LightSecondaryText);
+    SetTextColor(dc, highContrast_ ? GetSysColor(COLOR_WINDOWTEXT) : dark_ ? DarkSecondaryText : LightSecondaryText);
     RECT captureCaption{scale(44), scale(101), client.right - scale(44), scale(124)};
     const auto captureText = Localized(StringId::CaptureControls, displayLanguage_);
     DrawTextW(dc, captureText.data(), static_cast<int>(captureText.size()), &captureCaption,
@@ -500,7 +510,12 @@ void SettingsWindow::drawActionButton(const DRAWITEMSTRUCT& item) {
     COLORREF fill{};
     COLORREF outline{};
     COLORREF text{};
-    if (primary) {
+    if (highContrast_) {
+        const bool emphasized = primary || hovered || pressed;
+        fill = GetSysColor(emphasized ? COLOR_HIGHLIGHT : COLOR_BTNFACE);
+        outline = GetSysColor(COLOR_WINDOWTEXT);
+        text = GetSysColor(emphasized ? COLOR_HIGHLIGHTTEXT : COLOR_BTNTEXT);
+    } else if (primary) {
         fill = pressed ? RGB(0, 82, 148) : hovered ? RGB(16, 110, 190) : Accent;
         outline = fill;
         text = RGB(255, 255, 255);
@@ -531,7 +546,9 @@ void SettingsWindow::drawActionButton(const DRAWITEMSTRUCT& item) {
 void SettingsWindow::drawComboItem(const DRAWITEMSTRUCT& item) {
     if (item.itemID == static_cast<UINT>(-1)) return;
     const bool selected = (item.itemState & ODS_SELECTED) != 0 && (item.itemState & ODS_COMBOBOXEDIT) == 0;
-    const COLORREF background = selected ? Accent : (dark_ ? DarkInput : LightInput);
+    const COLORREF background = highContrast_
+        ? GetSysColor(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW)
+        : selected ? Accent : (dark_ ? DarkInput : LightInput);
     HBRUSH brush = CreateSolidBrush(background);
     FillRect(item.hDC, &item.rcItem, brush);
     DeleteObject(brush);
@@ -542,7 +559,9 @@ void SettingsWindow::drawComboItem(const DRAWITEMSTRUCT& item) {
     label.left += scale(10);
     label.right -= scale(10);
     SetBkMode(item.hDC, TRANSPARENT);
-    SetTextColor(item.hDC, selected ? RGB(255, 255, 255) : (dark_ ? DarkText : LightText));
+    SetTextColor(item.hDC, highContrast_
+        ? GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT)
+        : selected ? RGB(255, 255, 255) : (dark_ ? DarkText : LightText));
     const auto oldFont = SelectObject(item.hDC, bodyFont_);
     DrawTextW(item.hDC, text, -1, &label, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(item.hDC, oldFont);
@@ -556,8 +575,9 @@ void SettingsWindow::drawInputControl(HWND control, int id, HDC target) {
     GetClientRect(control, &client);
     const bool focused = GetFocus() == control;
     const bool hovered = hoveredInput_ == id;
-    const COLORREF background = dark_ ? DarkInput : LightInput;
-    const COLORREF outline = focused ? Accent
+    const COLORREF background = highContrast_ ? GetSysColor(COLOR_WINDOW) : dark_ ? DarkInput : LightInput;
+    const COLORREF outline = highContrast_ ? GetSysColor(focused || hovered ? COLOR_HIGHLIGHT : COLOR_WINDOWTEXT)
+                             : focused ? Accent
                              : hovered ? (dark_ ? RGB(112, 112, 112) : RGB(145, 145, 145))
                                        : (dark_ ? RGB(86, 86, 86) : RGB(190, 190, 190));
     FillRoundedRect(dc, client, scale(6), background, outline);
@@ -574,14 +594,17 @@ void SettingsWindow::drawInputControl(HWND control, int id, HDC target) {
     label.left += scale(10);
     label.right -= scale(id == LanguageCombo ? 32 : 10);
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, IsWindowEnabled(control) ? (dark_ ? DarkText : LightText) : (dark_ ? DarkSecondaryText : LightSecondaryText));
+    SetTextColor(dc, highContrast_
+        ? GetSysColor(IsWindowEnabled(control) ? COLOR_WINDOWTEXT : COLOR_GRAYTEXT)
+        : IsWindowEnabled(control) ? (dark_ ? DarkText : LightText) : (dark_ ? DarkSecondaryText : LightSecondaryText));
     const auto oldFont = SelectObject(dc, bodyFont_);
     const wchar_t* displayText = id == HotkeyControl ? hotkeyText.c_str() : text;
     DrawTextW(dc, displayText, -1, &label, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(dc, oldFont);
 
     if (id == LanguageCombo) {
-        HPEN pen = CreatePen(PS_SOLID, std::max(1, scale(1)), dark_ ? DarkSecondaryText : LightSecondaryText);
+        HPEN pen = CreatePen(PS_SOLID, std::max(1, scale(1)), highContrast_
+            ? GetSysColor(COLOR_WINDOWTEXT) : dark_ ? DarkSecondaryText : LightSecondaryText);
         const auto oldPen = SelectObject(dc, pen);
         const int arrowX = client.right - scale(17);
         const int arrowY = (client.top + client.bottom) / 2;
@@ -595,22 +618,23 @@ void SettingsWindow::drawInputControl(HWND control, int id, HDC target) {
 }
 
 void SettingsWindow::refreshTheme() {
-    dark_ = IsSystemDarkMode();
+    highContrast_ = IsHighContrastEnabled();
+    dark_ = !highContrast_ && IsSystemDarkMode();
     createUiResources();
 
     const BOOL dark = dark_ ? TRUE : FALSE;
     DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
     const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
-    const DWM_SYSTEMBACKDROP_TYPE backdrop = DWMSBT_MAINWINDOW;
+    const DWM_SYSTEMBACKDROP_TYPE backdrop = highContrast_ ? DWMSBT_NONE : DWMSBT_MAINWINDOW;
     DwmSetWindowAttribute(hwnd_, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
     EnumChildWindows(hwnd_, [](HWND child, LPARAM data) -> BOOL {
-        const bool darkMode = data != 0;
-        SetWindowTheme(child, darkMode ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        const auto theme = static_cast<int>(data);
+        SetWindowTheme(child, theme == 2 ? nullptr : theme == 1 ? L"DarkMode_Explorer" : L"Explorer", nullptr);
         return TRUE;
-    }, dark_ ? 1 : 0);
-    if (HWND language = GetDlgItem(hwnd_, LanguageCombo)) SetWindowTheme(language, L"", nullptr);
-    if (HWND hotkey = GetDlgItem(hwnd_, HotkeyControl)) SetWindowTheme(hotkey, L"", nullptr);
+    }, highContrast_ ? 2 : dark_ ? 1 : 0);
+    if (HWND language = GetDlgItem(hwnd_, LanguageCombo)) SetWindowTheme(language, highContrast_ ? nullptr : L"", nullptr);
+    if (HWND hotkey = GetDlgItem(hwnd_, HotkeyControl)) SetWindowTheme(hotkey, highContrast_ ? nullptr : L"", nullptr);
     RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
@@ -625,9 +649,9 @@ void SettingsWindow::createUiResources() {
     captionFont_ = CreateFontW(-scale(12), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
-    backgroundBrush_ = CreateSolidBrush(dark_ ? DarkBackground : LightBackground);
-    cardBrush_ = CreateSolidBrush(dark_ ? DarkCard : LightCard);
-    inputBrush_ = CreateSolidBrush(dark_ ? DarkInput : LightInput);
+    backgroundBrush_ = CreateSolidBrush(highContrast_ ? GetSysColor(COLOR_WINDOW) : dark_ ? DarkBackground : LightBackground);
+    cardBrush_ = CreateSolidBrush(highContrast_ ? GetSysColor(COLOR_WINDOW) : dark_ ? DarkCard : LightCard);
+    inputBrush_ = CreateSolidBrush(highContrast_ ? GetSysColor(COLOR_WINDOW) : dark_ ? DarkInput : LightInput);
 
     if (hwnd_) {
         EnumChildWindows(hwnd_, [](HWND child, LPARAM data) -> BOOL {

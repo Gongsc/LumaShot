@@ -20,6 +20,39 @@ void CheckHr(HRESULT value, const char* message) {
     throw std::runtime_error(text.str());
 }
 
+std::filesystem::path TemporaryPathFor(const std::filesystem::path& target) {
+    GUID id{};
+    CheckHr(CoCreateGuid(&id), "Could not create a temporary output name");
+    wchar_t text[40]{};
+    if (StringFromGUID2(id, text, ARRAYSIZE(text)) == 0)
+        throw std::runtime_error("Could not format a temporary output name");
+    return target.parent_path() / (target.filename().wstring() + L"." + text + L".tmp");
+}
+
+class TemporaryOutput final {
+public:
+    explicit TemporaryOutput(const std::filesystem::path& target) : path_(TemporaryPathFor(target)) {}
+    ~TemporaryOutput() { if (!committed_) DeleteFileW(path_.c_str()); }
+    TemporaryOutput(const TemporaryOutput&) = delete;
+    TemporaryOutput& operator=(const TemporaryOutput&) = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
+
+    void commitTo(const std::filesystem::path& target) {
+        // A same-directory rename keeps the final path unchanged until encoding has
+        // succeeded. MOVEFILE_REPLACE_EXISTING also works on destinations that do
+        // not support ReplaceFileW (for example some temporary/test volumes).
+        if (!MoveFileExW(path_.c_str(), target.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            CheckHr(HRESULT_FROM_WIN32(GetLastError()), "Could not commit output file");
+        committed_ = true;
+    }
+
+private:
+    std::filesystem::path path_;
+    bool committed_{};
+};
+
 ComPtr<IWICImagingFactory> Factory() {
     ComPtr<IWICImagingFactory> factory;
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) throw std::runtime_error("WIC is unavailable");
@@ -78,11 +111,15 @@ void Encode(IStream* stream, REFGUID container, REFGUID pixelFormat, UINT width,
 
 void Save(const std::filesystem::path& path, REFGUID container, REFGUID pixelFormat, UINT width, UINT height,
           UINT stride, UINT byteCount, BYTE* pixels, bool lossless, bool srgb) {
+    TemporaryOutput output(path);
     auto factory = Factory();
     ComPtr<IWICStream> stream;
-    if (FAILED(factory->CreateStream(&stream)) || FAILED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE))) throw std::runtime_error("Could not open output file");
-    try { Encode(stream.Get(), container, pixelFormat, width, height, stride, byteCount, pixels, lossless, srgb); }
-    catch (...) { stream.Reset(); DeleteFileW(path.c_str()); throw; }
+    if (FAILED(factory->CreateStream(&stream)) ||
+        FAILED(stream->InitializeFromFilename(output.path().c_str(), GENERIC_WRITE)))
+        throw std::runtime_error("Could not open temporary output file");
+    Encode(stream.Get(), container, pixelFormat, width, height, stride, byteCount, pixels, lossless, srgb);
+    stream.Reset();
+    output.commitTo(path);
 }
 
 } // namespace
@@ -93,16 +130,20 @@ std::optional<SaveChoice> ImageExporter::showSaveDialog(HWND owner, bool default
     const std::wstring pngName(Localized(StringId::PngDescription, language));
     const std::wstring jxrName(Localized(StringId::JxrDescription, language));
     COMDLG_FILTERSPEC filters[]{{pngName.c_str(), L"*.png"}, {jxrName.c_str(), L"*.jxr"}};
-    dialog->SetFileTypes(2, filters);
-    dialog->SetFileTypeIndex(defaultHdr ? 2 : 1);
-    dialog->SetDefaultExtension(defaultHdr ? L"jxr" : L"png");
+    CheckHr(dialog->SetFileTypes(2, filters), "Could not configure file types");
+    CheckHr(dialog->SetFileTypeIndex(defaultHdr ? 2 : 1), "Could not select a file type");
+    CheckHr(dialog->SetDefaultExtension(defaultHdr ? L"jxr" : L"png"), "Could not set the default extension");
+    FILEOPENDIALOGOPTIONS options{};
+    CheckHr(dialog->GetOptions(&options), "Could not read file dialog options");
+    CheckHr(dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_STRICTFILETYPES | FOS_OVERWRITEPROMPT),
+            "Could not configure file dialog options");
     const auto name = SuggestedName();
-    dialog->SetFileName(name.c_str());
+    CheckHr(dialog->SetFileName(name.c_str()), "Could not set the suggested file name");
     const HRESULT shown = dialog->Show(owner);
     if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return std::nullopt;
     if (FAILED(shown)) throw std::runtime_error("Could not show file dialog");
     UINT index{};
-    dialog->GetFileTypeIndex(&index);
+    CheckHr(dialog->GetFileTypeIndex(&index), "Could not read selected file type");
     ComPtr<IShellItem> item;
     if (FAILED(dialog->GetResult(&item))) throw std::runtime_error("Could not read selected file");
     PWSTR raw{};
@@ -110,7 +151,6 @@ std::optional<SaveChoice> ImageExporter::showSaveDialog(HWND owner, bool default
     std::filesystem::path path(raw);
     CoTaskMemFree(raw);
     const auto format = index == 2 ? ExportFormat::JpegXrHdr : ExportFormat::PngSdr;
-    path.replace_extension(format == ExportFormat::JpegXrHdr ? L".jxr" : L".png");
     return SaveChoice{path, format};
 }
 

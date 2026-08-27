@@ -34,6 +34,8 @@ private:
     bool draggingPanel_{};
     bool finished_{};
     bool accepted_{};
+    UINT uiDpi_{96};
+    HFONT controlFont_{};
     HDC backBufferDc_{};
     HBITMAP backBufferBitmap_{};
     HGDIOBJ backBufferPrevious_{};
@@ -42,8 +44,12 @@ private:
 
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     LRESULT handleMessage(UINT message, WPARAM wparam, LPARAM lparam);
+    void createControls();
+    void refreshControlTheme();
+    void updateControlValues();
     void paint();
     void layoutPanel(bool resetPosition);
+    void updatePanelDpi();
     void updatePanelControls();
     [[nodiscard]] int controlAt(POINT point) const noexcept;
     void activateControl(int id);
@@ -53,6 +59,7 @@ private:
     [[nodiscard]] bool ensureBackBuffer(HDC reference, int width, int height);
     void releaseBackBuffer() noexcept;
     void finish(bool accepted);
+    [[nodiscard]] int scale(int value) const noexcept;
 };
 
 } // namespace lumashot

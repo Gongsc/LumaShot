@@ -1,6 +1,7 @@
 #include <LumaShot/Localization.h>
 #include <Windows.h>
 #include <array>
+#include <vector>
 
 namespace lumashot {
 namespace {
@@ -14,6 +15,7 @@ constexpr std::array entries{
     Entry{StringId::Pen, L"画笔", L"Pen"}, Entry{StringId::Rectangle, L"矩形", L"Rectangle"}, Entry{StringId::Arrow, L"箭头", L"Arrow"},
     Entry{StringId::Text, L"文字", L"Text"}, Entry{StringId::Undo, L"撤销", L"Undo"}, Entry{StringId::Redo, L"重做", L"Redo"},
     Entry{StringId::Color, L"颜色", L"Color"}, Entry{StringId::LineWidth, L"粗细", L"Width"},
+    Entry{StringId::Selected, L"已选择", L"Selected"},
     Entry{StringId::Language, L"语言", L"Language"}, Entry{StringId::Automatic, L"跟随系统", L"System default"},
     Entry{StringId::Chinese, L"简体中文", L"Simplified Chinese"}, Entry{StringId::English, L"英文", L"English"},
     Entry{StringId::Hotkey, L"快捷键", L"Hotkey"}, Entry{StringId::IncludeCursor, L"包含鼠标指针", L"Include mouse pointer"},
@@ -41,8 +43,24 @@ constexpr std::array entries{
 
 Language ResolveLanguage(Language configured) noexcept {
     if (configured != Language::Automatic) return configured;
-    wchar_t name[LOCALE_NAME_MAX_LENGTH]{};
-    if (GetUserDefaultLocaleName(name, static_cast<int>(std::size(name))) && wcsncmp(name, L"zh", 2) == 0) return Language::SimplifiedChinese;
+    ULONG languageCount{};
+    ULONG bufferLength{};
+    (void)GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &languageCount, nullptr, &bufferLength);
+    if (bufferLength > 0) {
+        std::vector<wchar_t> languages(bufferLength);
+        if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &languageCount,
+                                        languages.data(), &bufferLength)) {
+            for (const wchar_t* language = languages.data(); *language;
+                 language += wcslen(language) + 1) {
+                if (_wcsnicmp(language, L"zh", 2) == 0 &&
+                    (language[2] == L'\0' || language[2] == L'-'))
+                    return Language::SimplifiedChinese;
+                if (_wcsnicmp(language, L"en", 2) == 0 &&
+                    (language[2] == L'\0' || language[2] == L'-'))
+                    return Language::English;
+            }
+        }
+    }
     return Language::English;
 }
 
