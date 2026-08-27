@@ -7,6 +7,8 @@ namespace lumashot {
 [[nodiscard]] RectI ClampRect(RectI value, RectI bounds) noexcept;
 [[nodiscard]] bool ContainsPoint(RectI value, int x, int y) noexcept;
 [[nodiscard]] RectI PlaceToolbar(RectI selection, RectI monitorBounds, int width, int height, int margin = 8) noexcept;
+[[nodiscard]] RectI PlaceMagnifier(POINT cursor, RectI bounds, int width, int height,
+                                   int gap = 20, int margin = 8) noexcept;
 [[nodiscard]] POINT MapPointBetweenRects(POINT point, RectI sourceBounds, RectI targetBounds) noexcept;
 [[nodiscard]] RectI MapRectBetweenRects(RectI value, RectI sourceBounds, RectI targetBounds) noexcept;
 [[nodiscard]] RECT ToWin32Rect(RectI value) noexcept;

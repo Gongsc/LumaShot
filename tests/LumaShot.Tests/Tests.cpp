@@ -41,6 +41,13 @@ void GeometryTests() {
     const auto regionToolbar = PlaceToolbar({100, 100, 800, 600}, {0, 0, 1920, 1080}, 524, 44);
     Check(regionToolbar.top == 608 && regionToolbar.left == 188,
           "places a region toolbar below the selection when real monitor space exists");
+    const auto magnifier = PlaceMagnifier({400, 300}, {0, 0, 1920, 1080}, 146, 146);
+    Check(magnifier.left == 420 && magnifier.top == 320,
+          "places the magnifier below and to the right of the pointer when space exists");
+    const auto flippedMagnifier = PlaceMagnifier({1900, 1060}, {0, 0, 1920, 1080}, 146, 146);
+    Check(flippedMagnifier.left == 1734 && flippedMagnifier.top == 894 &&
+              flippedMagnifier.right <= 1912 && flippedMagnifier.bottom <= 1072,
+          "keeps the magnifier on screen without covering the pointer near an edge");
     const RectI desktop{-2160, -1145, 3840, 2695};
     const RectI overlayClient{0, 0, 4800, 3072};
     const POINT desktopPoint = MapPointBetweenRects({2400, 1536}, overlayClient, desktop);

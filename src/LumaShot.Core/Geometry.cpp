@@ -51,6 +51,32 @@ RectI PlaceToolbar(RectI selection, RectI monitorBounds, int width, int height, 
     return {x, y, x + width, y + height};
 }
 
+RectI PlaceMagnifier(POINT cursor, RectI bounds, int width, int height, int gap, int margin) noexcept {
+    bounds = NormalizeRect(bounds);
+    width = std::max(1, width);
+    height = std::max(1, height);
+    gap = std::max(0, gap);
+    margin = std::max(0, margin);
+
+    const int availableWidth = std::max(1, bounds.width() - margin * 2);
+    const int availableHeight = std::max(1, bounds.height() - margin * 2);
+    width = std::min(width, availableWidth);
+    height = std::min(height, availableHeight);
+
+    const int minimumX = bounds.left + margin;
+    const int minimumY = bounds.top + margin;
+    const int maximumX = std::max(minimumX, bounds.right - margin - width);
+    const int maximumY = std::max(minimumY, bounds.bottom - margin - height);
+    const int right = cursor.x + gap;
+    const int left = cursor.x - gap - width;
+    const int below = cursor.y + gap;
+    const int above = cursor.y - gap - height;
+
+    const int x = right <= maximumX ? right : left >= minimumX ? left : std::clamp(right, minimumX, maximumX);
+    const int y = below <= maximumY ? below : above >= minimumY ? above : std::clamp(below, minimumY, maximumY);
+    return {x, y, x + width, y + height};
+}
+
 POINT MapPointBetweenRects(POINT point, RectI sourceBounds, RectI targetBounds) noexcept {
     const int sourceWidth = sourceBounds.width();
     const int sourceHeight = sourceBounds.height();

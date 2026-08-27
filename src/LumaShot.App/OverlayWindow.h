@@ -62,6 +62,8 @@ private:
     HGDIOBJ backBufferPrevious_{};
     int backBufferWidth_{};
     int backBufferHeight_{};
+    POINT mouseClient_{};
+    bool mouseInside_{};
 
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     static LRESULT CALLBACK EditProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR data);
@@ -71,6 +73,9 @@ private:
     void releaseBackBuffer() noexcept;
     void updateCalibrationPreview();
     void updateMaskedPreview();
+    [[nodiscard]] bool magnifierVisible() const noexcept;
+    [[nodiscard]] RECT magnifierRect(POINT clientPoint, const RECT& client) const noexcept;
+    void drawMagnifier(HDC dc, const RECT& client) const;
     void rebuildButtons();
     [[nodiscard]] int buttonAt(POINT clientPoint) const noexcept;
     void activateButton(int id);

@@ -34,6 +34,11 @@ constexpr int ToolWidth = 207;
 constexpr int ActionCopy = 209;
 constexpr int ActionSave = 210;
 constexpr int ActionCancel = 211;
+constexpr int MagnifierSampleSize = 17;
+constexpr int MagnifierZoom = 8;
+constexpr int MagnifierPadding = 5;
+constexpr int MagnifierContentSize = MagnifierSampleSize * MagnifierZoom;
+constexpr int MagnifierSize = MagnifierContentSize + MagnifierPadding * 2;
 constexpr std::array<ColorRgba, 6> AnnotationColors{{
     {255, 55, 55, 255}, {255, 213, 55, 255}, {60, 205, 95, 255},
     {50, 205, 230, 255}, {65, 125, 255, 255}, {255, 255, 255, 255}}};
@@ -469,10 +474,28 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     }
     case WM_MOUSEMOVE: {
         POINT client = PointFromLParam(lparam);
+        const bool previousMagnifierVisible = magnifierVisible();
+        const POINT previousMouseClient = mouseClient_;
+        mouseClient_ = client;
+        mouseInside_ = true;
         const int hovered = buttonAt(client);
         if (hovered != hoveredButton_) {
             hoveredButton_ = hovered;
             InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        if (previousMagnifierVisible || magnifierVisible()) {
+            RECT clientBounds{};
+            GetClientRect(hwnd_, &clientBounds);
+            RECT dirty{};
+            if (previousMagnifierVisible && magnifierVisible()) {
+                const RECT previous = magnifierRect(previousMouseClient, clientBounds);
+                const RECT current = magnifierRect(mouseClient_, clientBounds);
+                UnionRect(&dirty, &previous, &current);
+            } else {
+                dirty = magnifierRect(previousMagnifierVisible ? previousMouseClient : mouseClient_, clientBounds);
+            }
+            InflateRect(&dirty, 4, 4);
+            InvalidateRect(hwnd_, &dirty, FALSE);
         }
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd_, 0}; TrackMouseEvent(&tracking);
         if (pressedButton_ >= 0) { SetCursor(cursorForPoint(client)); return 0; }
@@ -495,9 +518,24 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         SetCursor(cursorForPoint(client));
         return 0;
     }
-    case WM_MOUSELEAVE:
-        if (hoveredButton_ >= 0) { hoveredButton_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+    case WM_MOUSELEAVE: {
+        const bool previousMagnifierVisible = magnifierVisible();
+        RECT previousMagnifier{};
+        if (previousMagnifierVisible) {
+            RECT clientBounds{};
+            GetClientRect(hwnd_, &clientBounds);
+            previousMagnifier = magnifierRect(mouseClient_, clientBounds);
+            InflateRect(&previousMagnifier, 4, 4);
+        }
+        mouseInside_ = false;
+        if (hoveredButton_ >= 0) {
+            hoveredButton_ = -1;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        } else if (previousMagnifierVisible) {
+            InvalidateRect(hwnd_, &previousMagnifier, FALSE);
+        }
         return 0;
+    }
     case WM_LBUTTONDOWN: {
         SetFocus(hwnd_);
         POINT client = PointFromLParam(lparam);
@@ -887,11 +925,89 @@ void OverlayWindow::updateMaskedPreview() {
     maskedSelectionPixels_ = selectedPixels;
 }
 
+bool OverlayWindow::magnifierVisible() const noexcept {
+    return mouseInside_ && mode_ == CaptureMode::Region && tool_ == AnnotationTool::None &&
+           hoveredButton_ < 0 && pressedButton_ < 0 && preview_.width > 0 && preview_.height > 0;
+}
+
+RECT OverlayWindow::magnifierRect(POINT clientPoint, const RECT& client) const noexcept {
+    return ToWin32Rect(PlaceMagnifier(clientPoint, FromWin32Rect(client), MagnifierSize, MagnifierSize));
+}
+
+void OverlayWindow::drawMagnifier(HDC dc, const RECT& client) const {
+    if (!magnifierVisible()) return;
+
+    const RECT outer = magnifierRect(mouseClient_, client);
+    RECT shadow = outer;
+    OffsetRect(&shadow, 2, 3);
+    FillRoundRect(dc, shadow, 13, RGB(13, 13, 14), RGB(13, 13, 14));
+    FillRoundRect(dc, outer, 13, RGB(31, 31, 34), RGB(112, 112, 118));
+
+    RECT content{outer.left + MagnifierPadding, outer.top + MagnifierPadding,
+                 outer.right - MagnifierPadding, outer.bottom - MagnifierPadding};
+    const RectI previewBounds{0, 0, static_cast<int>(preview_.width), static_cast<int>(preview_.height)};
+    // Match the same client-to-preview transform used to paint the full-screen image.
+    // A round trip through desktop coordinates can lose a pixel on scaled desktops.
+    const POINT mappedSourcePoint = MapPointBetweenRects(mouseClient_, FromWin32Rect(client), previewBounds);
+    const int sourceX = std::clamp(static_cast<int>(mappedSourcePoint.x), 0, static_cast<int>(preview_.width) - 1);
+    const int sourceY = std::clamp(static_cast<int>(mappedSourcePoint.y), 0, static_cast<int>(preview_.height) - 1);
+
+    const int sourceWidth = std::min(MagnifierSampleSize, static_cast<int>(preview_.width));
+    const int sourceHeight = std::min(MagnifierSampleSize, static_cast<int>(preview_.height));
+    const int sourceLeft = std::clamp(sourceX - sourceWidth / 2, 0,
+                                      static_cast<int>(preview_.width) - sourceWidth);
+    const int sourceTop = std::clamp(sourceY - sourceHeight / 2, 0,
+                                     static_cast<int>(preview_.height) - sourceHeight);
+
+    // Give GDI a tightly packed tile so source-rectangle handling cannot shift the sample.
+    std::array<std::uint8_t, MagnifierSampleSize * MagnifierSampleSize * 4> sourcePixels{};
+    const std::size_t sourceRowBytes = static_cast<std::size_t>(sourceWidth) * 4;
+    for (int row = 0; row < sourceHeight; ++row) {
+        const std::size_t previewOffset =
+            (static_cast<std::size_t>(sourceTop + row) * preview_.width + sourceLeft) * 4;
+        memcpy(sourcePixels.data() + static_cast<std::size_t>(row) * sourceRowBytes,
+               preview_.pixels.data() + previewOffset, sourceRowBytes);
+    }
+
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = sourceWidth;
+    info.bmiHeader.biHeight = -sourceHeight;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    const int previousStretchMode = SetStretchBltMode(dc, COLORONCOLOR);
+    StretchDIBits(dc, content.left, content.top, content.right - content.left, content.bottom - content.top,
+                  0, 0, sourceWidth, sourceHeight, sourcePixels.data(), &info,
+                  DIB_RGB_COLORS, SRCCOPY);
+    if (previousStretchMode != 0) SetStretchBltMode(dc, previousStretchMode);
+
+    HPEN contentOutline = CreatePen(PS_SOLID, 1, RGB(190, 190, 195));
+    const auto previousPen = SelectObject(dc, contentOutline);
+    const auto previousBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+    Rectangle(dc, content.left, content.top, content.right, content.bottom);
+    SelectObject(dc, previousPen);
+    DeleteObject(contentOutline);
+
+    const int pixelLeft = content.left + (sourceX - sourceLeft) * (content.right - content.left) / sourceWidth;
+    const int pixelTop = content.top + (sourceY - sourceTop) * (content.bottom - content.top) / sourceHeight;
+    const int pixelRight = content.left + (sourceX - sourceLeft + 1) * (content.right - content.left) / sourceWidth;
+    const int pixelBottom = content.top + (sourceY - sourceTop + 1) * (content.bottom - content.top) / sourceHeight;
+    HPEN pixelOutline = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+    SelectObject(dc, pixelOutline);
+    Rectangle(dc, pixelLeft, pixelTop, pixelRight + 1, pixelBottom + 1);
+    SelectObject(dc, previousPen);
+    SelectObject(dc, previousBrush);
+    DeleteObject(pixelOutline);
+}
+
 void OverlayWindow::paint() {
     PAINTSTRUCT ps{}; HDC windowDc = BeginPaint(hwnd_, &ps);
     RECT client{}; GetClientRect(hwnd_, &client);
     const bool buffered = ensureBackBuffer(windowDc, client.right - client.left, client.bottom - client.top);
     HDC dc = buffered ? backBufferDc_ : windowDc;
+    const int savedBufferState = buffered ? SaveDC(dc) : 0;
+    if (buffered) IntersectClipRect(dc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right, ps.rcPaint.bottom);
     BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER); info.bmiHeader.biWidth = static_cast<LONG>(preview_.width);
     info.bmiHeader.biHeight = -static_cast<LONG>(preview_.height); info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
     const bool regionMode = mode_ == CaptureMode::Region;
@@ -934,6 +1050,7 @@ void OverlayWindow::paint() {
         if (draft_) drawOne(*draft_);
         if (regionMode) DrawSelectionHandles(dc, selected);
     } else if (!regionMode) AlphaFill(dc, client, 105);
+    drawMagnifier(dc, client);
     rebuildButtons();
     SetBkMode(dc, TRANSPARENT);
     HFONT font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
@@ -1009,7 +1126,12 @@ void OverlayWindow::paint() {
 
     SelectObject(dc, oldFont);
     DeleteObject(font);
-    if (buffered) BitBlt(windowDc, 0, 0, client.right - client.left, client.bottom - client.top, dc, 0, 0, SRCCOPY);
+    if (buffered) {
+        if (savedBufferState != 0) RestoreDC(dc, savedBufferState);
+        BitBlt(windowDc, ps.rcPaint.left, ps.rcPaint.top,
+               ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
+               dc, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+    }
     EndPaint(hwnd_, &ps);
 }
 
