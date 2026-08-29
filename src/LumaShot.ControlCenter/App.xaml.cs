@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using LumaShot_ControlCenter.Services;
 namespace LumaShot_ControlCenter;
 
 /// <summary>
@@ -39,8 +40,22 @@ public partial class App : Application
     /// Invoked when the application is launched.
     /// </summary>
     /// <param name="args">Details about the launch request and process.</param>
-    protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        string[] commandLine = Environment.GetCommandLineArgs();
+        if (commandLine.Contains("--verify-bundle", StringComparer.OrdinalIgnoreCase))
+        {
+            Environment.Exit(NativeBridge.VerifyBundledBackend() ? 0 : 2);
+            return;
+        }
+
+        if (commandLine.Contains("--background", StringComparer.OrdinalIgnoreCase))
+        {
+            bool started = await new NativeBridge().EnsureBackendAsync();
+            Environment.Exit(started ? 0 : 3);
+            return;
+        }
+
         Window = new MainWindow();
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         Window.Activate();

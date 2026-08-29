@@ -17,15 +17,13 @@ jobs:
   build-windows-x64:
     name: Windows x64
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     env:
       CONFIGURATION: Release
       PLATFORM: x64
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      NATIVE_ARCHIVE: artifacts/LumaShot-native-x64-${{ github.ref_name }}.zip
-      CONTROL_CENTER_ARCHIVE: artifacts/LumaShot-control-center-x64-${{ github.ref_name }}.zip
 
     steps:
       - name: Check out repository
@@ -39,7 +37,26 @@ jobs:
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build native application and tests
+      - name: Prepare release metadata
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $version = $env:GITHUB_REF_NAME.Substring(1)
+            $label = $env:GITHUB_REF_NAME
+          }
+          else {
+            $version = "0.0.0-ci.$env:GITHUB_RUN_NUMBER"
+            $label = "ci-$env:GITHUB_RUN_NUMBER"
+          }
+
+          $safeLabel = $label -replace '[^0-9A-Za-z._-]', '-'
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARTIFACT_LABEL=$safeLabel" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "STANDALONE_EXE=artifacts/LumaShot-$safeLabel-x64.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SETUP_BASENAME=LumaShot-$safeLabel-Setup-x64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SETUP_EXE=artifacts/LumaShot-$safeLabel-Setup-x64.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build native screenshot engine and tests
         shell: pwsh
         run: >-
           msbuild LumaShot.sln
@@ -48,53 +65,83 @@ jobs:
           /p:Platform=$env:PLATFORM
           /v:minimal
 
-      - name: Build WinUI 3 control center
-        shell: pwsh
-        run: >-
-          dotnet build src/LumaShot.ControlCenter/LumaShot.ControlCenter.csproj
-          --configuration $env:CONFIGURATION
-          --runtime win-x64
-          -p:Platform=$env:PLATFORM
-          -p:ContinuousIntegrationBuild=true
-          --verbosity minimal
-
       - name: Run native tests
         shell: pwsh
         run: ./bin/Release/LumaShot.Tests.exe
 
-      - name: Package release archives
+      - name: Publish unified standalone application
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $nativeStage = Join-Path $env:RUNNER_TEMP 'LumaShot-native-x64'
-          $controlCenterStage = Join-Path $env:RUNNER_TEMP 'LumaShot-control-center-x64'
-          $controlCenterOutput = 'src/LumaShot.ControlCenter/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64'
+          dotnet publish src/LumaShot.ControlCenter/LumaShot.ControlCenter.csproj `
+            --configuration $env:CONFIGURATION `
+            --runtime win-x64 `
+            --self-contained true `
+            --output artifacts/publish `
+            -p:Platform=$env:PLATFORM `
+            -p:ContinuousIntegrationBuild=true `
+            -p:Version=$env:VERSION `
+            --verbosity minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          New-Item -ItemType Directory -Force -Path $nativeStage, $controlCenterStage, 'artifacts' | Out-Null
+          Copy-Item -LiteralPath 'artifacts/publish/LumaShot.exe' -Destination $env:STANDALONE_EXE -Force
 
-          Copy-Item -LiteralPath 'bin/Release/LumaShot.exe' -Destination $nativeStage
-          Copy-Item -LiteralPath 'LICENSE', 'README.md', 'README.zh-CN.md' -Destination $nativeStage
-          Copy-Item -LiteralPath 'docs' -Destination $nativeStage -Recurse
+      - name: Verify embedded native screenshot engine
+        shell: pwsh
+        run: |
+          $runtimeRoot = Join-Path $env:RUNNER_TEMP "LumaShot-runtime-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          try {
+            $env:LUMASHOT_RUNTIME_ROOT = $runtimeRoot
+            $verification = Start-Process `
+              -FilePath $env:STANDALONE_EXE `
+              -ArgumentList '--verify-bundle' `
+              -WindowStyle Hidden `
+              -Wait `
+              -PassThru
+            if ($verification.ExitCode -ne 0) { throw "Bundle verification failed with exit code $($verification.ExitCode)." }
 
-          Copy-Item -Path "$controlCenterOutput/*" -Destination $controlCenterStage -Recurse
-          Copy-Item -LiteralPath 'LICENSE' -Destination $controlCenterStage
+            $backend = Get-ChildItem -LiteralPath $runtimeRoot -Filter 'LumaShot.Native.exe' -Recurse -File |
+              Select-Object -First 1
+            if (-not $backend) { throw 'The embedded native screenshot engine was not extracted.' }
+          }
+          finally {
+            Remove-Item Env:LUMASHOT_RUNTIME_ROOT -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $runtimeRoot) {
+              Remove-Item -LiteralPath $runtimeRoot -Recurse -Force
+            }
+          }
 
-          Compress-Archive -Path "$nativeStage/*" -DestinationPath $env:NATIVE_ARCHIVE -Force
-          Compress-Archive -Path "$controlCenterStage/*" -DestinationPath $env:CONTROL_CENTER_ARCHIVE -Force
+      - name: Set up Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            choco install innosetup --no-progress --yes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path -LiteralPath $iscc)) { throw 'Inno Setup compiler was not found.' }
+          "ISCC_PATH=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Upload native application
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & $env:ISCC_PATH "/DMyAppVersion=$env:VERSION" "/DMyOutputBaseFilename=$env:SETUP_BASENAME" installer/LumaShot.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $env:SETUP_EXE)) { throw 'Installer output was not produced.' }
+          Remove-Item -LiteralPath 'artifacts/publish' -Recurse -Force
+
+      - name: Upload standalone executable
         uses: actions/upload-artifact@v4
         with:
-          name: LumaShot-native-x64-${{ github.ref_name }}
-          path: ${{ env.NATIVE_ARCHIVE }}
+          name: LumaShot-standalone-${{ env.ARTIFACT_LABEL }}-x64
+          path: ${{ env.STANDALONE_EXE }}
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload WinUI 3 control center
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: LumaShot-control-center-x64-${{ github.ref_name }}
-          path: ${{ env.CONTROL_CENTER_ARCHIVE }}
+          name: LumaShot-installer-${{ env.ARTIFACT_LABEL }}-x64
+          path: ${{ env.SETUP_EXE }}
           if-no-files-found: error
           retention-days: 14
 
@@ -107,7 +154,7 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
           $repository = $env:GITHUB_REPOSITORY
-          $assets = @($env:NATIVE_ARCHIVE, $env:CONTROL_CENTER_ARCHIVE)
+          $assets = @($env:STANDALONE_EXE, $env:SETUP_EXE)
 
           & gh release view $tag --repo $repository *> $null
           $releaseExists = $LASTEXITCODE -eq 0

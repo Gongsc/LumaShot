@@ -23,7 +23,7 @@
 
 ## Use
 
-Launch `LumaShot.exe`; the app remains in the notification area. Double-click its tray icon or press the global hotkey (`Ctrl+Shift+PrintScreen` by default), select a capture mode, adjust or annotate the selection, then copy or save it. HDR selections default to JPEG XR; PNG and clipboard output are converted to SDR for broad application compatibility.
+Launch `LumaShot.exe` to open the control center and start the native screenshot engine in the notification area. Double-click its tray icon or press the global hotkey (`Ctrl+Shift+PrintScreen` by default), select a capture mode, adjust or annotate the selection, then copy or save it. HDR selections default to JPEG XR; PNG and clipboard output are converted to SDR for broad application compatibility.
 
 Keyboard shortcuts: `Enter` copy when enabled, `Ctrl+C` copy, `Ctrl+S` save, `Ctrl+Z` undo, `Ctrl+Y` redo, and `Esc` cancel.
 
@@ -31,12 +31,15 @@ Keyboard shortcuts: `Enter` copy when enabled, `Ctrl+C` copy, `Ctrl+S` save, `Ct
 
 - Windows 11 22H2 or later, x64
 - Visual Studio 2022 Build Tools with Desktop development with C++ and the Windows 11 SDK
+- .NET 10 SDK
 - Inno Setup 6 only when building the installer
 
 ```powershell
 .\scripts\build.ps1 -Configuration Release -RunTests
-.\scripts\package.ps1
+.\scripts\package.ps1 -Version 0.1.1
 ```
+
+Packaging creates a self-contained `LumaShot-v<version>-x64.exe` and `LumaShot-v<version>-Setup-x64.exe` in `artifacts`. No ZIP archive is produced.
 
 See the [HDR guide](docs/HDR-Guide.md) and [test matrix](docs/TESTING.md) for technical details. Protected or DRM content and the Windows secure desktop may appear black; LumaShot does not bypass operating-system capture restrictions.
 

@@ -18,10 +18,12 @@ $build = Start-Process -FilePath $msbuild -ArgumentList $arguments -UseNewEnviro
 $build.WaitForExit()
 if ($build.ExitCode -ne 0) { exit $build.ExitCode }
 
-$winapp = Get-Command winapp -ErrorAction SilentlyContinue
-if (-not $winapp) { throw 'WinApp CLI 0.6 or newer is required.' }
 $controlCenter = Join-Path $repoRoot 'src\LumaShot.ControlCenter\LumaShot.ControlCenter.csproj'
-& $winapp.Source run $controlCenter --no-launch --arch x64 --configuration $Configuration
+& dotnet build $controlCenter `
+    --configuration $Configuration `
+    --runtime win-x64 `
+    -p:Platform=x64 `
+    --verbosity minimal
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($RunTests) {

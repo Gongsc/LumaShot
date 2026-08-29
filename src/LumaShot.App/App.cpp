@@ -35,6 +35,16 @@ bool IsStartupConfigured() noexcept {
     RegCloseKey(key);
     return exists;
 }
+
+std::filesystem::path ControlCenterLaunchPath() {
+    const DWORD length = GetEnvironmentVariableW(L"LUMASHOT_CONTROL_CENTER", nullptr, 0);
+    if (length == 0) return {};
+    std::wstring value(length, L'\0');
+    const DWORD copied = GetEnvironmentVariableW(L"LUMASHOT_CONTROL_CENTER", value.data(), length);
+    if (copied == 0 || copied >= length) return {};
+    value.resize(copied);
+    return std::filesystem::path(std::move(value));
+}
 }
 
 App::App(HINSTANCE instance) : instance_(instance), settings_(settingsStore_.load()), language_(ResolveLanguage(settings_.language)) {
@@ -270,6 +280,16 @@ void App::showSettings() {
 }
 
 void App::showControlCenter() {
+    const auto launch = [this](const std::filesystem::path& candidate) {
+        if (candidate.empty() || !std::filesystem::exists(candidate)) return false;
+        const auto workingDirectory = candidate.parent_path();
+        const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
+            hwnd_, L"open", candidate.c_str(), nullptr, workingDirectory.c_str(), SW_SHOWNORMAL));
+        return result > 32;
+    };
+
+    if (launch(ControlCenterLaunchPath())) return;
+
     wchar_t executablePath[MAX_PATH]{};
     const DWORD length = GetModuleFileNameW(nullptr, executablePath, ARRAYSIZE(executablePath));
     if (length > 0 && length < ARRAYSIZE(executablePath)) {
@@ -279,10 +299,7 @@ void App::showControlCenter() {
             directory / L"ControlCenter" / L"LumaShot.ControlCenter.exe",
         };
         for (const auto& candidate : candidates) {
-            if (!std::filesystem::exists(candidate)) continue;
-            const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
-                hwnd_, L"open", candidate.c_str(), nullptr, directory.c_str(), SW_SHOWNORMAL));
-            if (result > 32) return;
+            if (launch(candidate)) return;
         }
     }
 
@@ -315,8 +332,15 @@ void App::applyStartupSetting() noexcept {
     HKEY key{};
     if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
     if (settings_.launchAtLogin) {
-        wchar_t path[MAX_PATH]{}; GetModuleFileNameW(nullptr, path, ARRAYSIZE(path));
-        const std::wstring command = L"\"" + std::wstring(path) + L"\"";
+        std::filesystem::path launchPath = ControlCenterLaunchPath();
+        const bool launchControlCenter = !launchPath.empty();
+        if (launchPath.empty()) {
+            wchar_t path[MAX_PATH]{};
+            GetModuleFileNameW(nullptr, path, ARRAYSIZE(path));
+            launchPath = path;
+        }
+        std::wstring command = L"\"" + launchPath.wstring() + L"\"";
+        if (launchControlCenter) command += L" --background";
         RegSetValueExW(key, L"LumaShot", 0, REG_SZ, reinterpret_cast<const BYTE*>(command.c_str()), static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
     } else RegDeleteValueW(key, L"LumaShot");
     RegCloseKey(key);

@@ -23,7 +23,7 @@
 
 ## 使用方法
 
-启动 `LumaShot.exe` 后，应用常驻通知区域。双击托盘图标或按全局快捷键（默认 `Ctrl+Shift+PrintScreen`），选择截图模式，调整选区或添加标注，然后复制或保存。HDR 选区默认保存为 JPEG XR；PNG 和剪贴板会转换为 SDR，以兼容常用应用。
+启动 `LumaShot.exe` 会打开控制中心，并在通知区域启动原生截图引擎。双击托盘图标或按全局快捷键（默认 `Ctrl+Shift+PrintScreen`），选择截图模式，调整选区或添加标注，然后复制或保存。HDR 选区默认保存为 JPEG XR；PNG 和剪贴板会转换为 SDR，以兼容常用应用。
 
 键盘快捷键：开启选项后按 `Enter` 复制，`Ctrl+C` 复制，`Ctrl+S` 保存，`Ctrl+Z` 撤销，`Ctrl+Y` 重做，`Esc` 取消。
 
@@ -31,12 +31,15 @@
 
 - Windows 11 22H2 或更高版本，x64
 - Visual Studio 2022 Build Tools、使用 C++ 的桌面开发组件及 Windows 11 SDK
+- .NET 10 SDK
 - 仅制作安装程序时需要 Inno Setup 6
 
 ```powershell
 .\scripts\build.ps1 -Configuration Release -RunTests
-.\scripts\package.ps1
+.\scripts\package.ps1 -Version 0.1.1
 ```
+
+打包后会在 `artifacts` 中直接生成自包含的 `LumaShot-v<版本>-x64.exe` 和 `LumaShot-v<版本>-Setup-x64.exe`，不会生成 ZIP 压缩包。
 
 技术细节请参阅 [HDR 指南](docs/HDR-Guide.md)和[测试矩阵](docs/TESTING.md)。受保护内容、DRM 内容及 Windows 安全桌面可能显示为黑色；LumaShot 不会绕过操作系统的捕获限制。
 

@@ -5,12 +5,18 @@ namespace LumaShot_ControlCenter.Services;
 
 internal sealed partial class NativeBridge
 {
+    private const string BackendResourceName = "LumaShot.Native.exe";
     private const uint CaptureModeMessage = 0x8000 + 74;
     private const uint ReloadSettingsMessage = 0x8000 + 75;
     private const uint BeginCalibrationMessage = 0x8000 + 76;
     private const string BackendWindowClass = "LumaShot.MessageWindow";
 
     public bool IsBackendAvailable => FindWindow(BackendWindowClass, null) != nint.Zero;
+
+    internal static bool VerifyBundledBackend()
+    {
+        return ExtractBundledBackend() is string path && File.Exists(path);
+    }
 
     public async Task<bool> EnsureBackendAsync()
     {
@@ -27,12 +33,18 @@ internal sealed partial class NativeBridge
 
         try
         {
-            Process.Start(new ProcessStartInfo
+            ProcessStartInfo startInfo = new()
             {
                 FileName = executable,
                 WorkingDirectory = Path.GetDirectoryName(executable)!,
-                UseShellExecute = true,
-            });
+                UseShellExecute = false,
+            };
+            if (Environment.ProcessPath is string controlCenterExecutable)
+            {
+                startInfo.Environment["LUMASHOT_CONTROL_CENTER"] = controlCenterExecutable;
+            }
+
+            Process.Start(startInfo);
         }
         catch (InvalidOperationException)
         {
@@ -88,6 +100,11 @@ internal sealed partial class NativeBridge
 
     private static string? FindBackendExecutable()
     {
+        if (ExtractBundledBackend() is string bundledBackend)
+        {
+            return bundledBackend;
+        }
+
         HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
         foreach (string origin in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
         {
@@ -96,7 +113,7 @@ internal sealed partial class NativeBridge
             {
                 foreach (string candidate in new[]
                 {
-                    Path.Combine(directory.FullName, "LumaShot.exe"),
+                    Path.Combine(directory.FullName, "LumaShot.Native.exe"),
                     Path.Combine(directory.FullName, "bin", "Debug", "LumaShot.exe"),
                     Path.Combine(directory.FullName, "bin", "Release", "LumaShot.exe"),
                 })
@@ -110,6 +127,59 @@ internal sealed partial class NativeBridge
         }
 
         return null;
+    }
+
+    private static string? ExtractBundledBackend()
+    {
+        try
+        {
+            using Stream? resource = typeof(NativeBridge).Assembly.GetManifestResourceStream(BackendResourceName);
+            if (resource is null)
+            {
+                return null;
+            }
+
+            string version = typeof(NativeBridge).Assembly.GetName().Version?.ToString() ?? "current";
+            string runtimeRoot = Environment.GetEnvironmentVariable("LUMASHOT_RUNTIME_ROOT")
+                ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LumaShot", "runtime");
+            string runtimeDirectory = Path.Combine(runtimeRoot, version);
+            string backendPath = Path.Combine(runtimeDirectory, BackendResourceName);
+
+            Directory.CreateDirectory(runtimeDirectory);
+            if (File.Exists(backendPath) && new FileInfo(backendPath).Length == resource.Length)
+            {
+                return backendPath;
+            }
+
+            string temporaryPath = Path.Combine(runtimeDirectory, $"{BackendResourceName}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                using (FileStream output = new(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    resource.CopyTo(output);
+                    output.Flush(flushToDisk: true);
+                }
+
+                File.Move(temporaryPath, backendPath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+
+            return backendPath;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     [LibraryImport("user32.dll", EntryPoint = "FindWindowW", StringMarshalling = StringMarshalling.Utf16)]
