@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace LumaShot_ControlCenter.Services;
 
@@ -9,6 +10,8 @@ internal sealed partial class NativeBridge
     private const uint CaptureModeMessage = 0x8000 + 74;
     private const uint ReloadSettingsMessage = 0x8000 + 75;
     private const uint BeginCalibrationMessage = 0x8000 + 76;
+    private const uint SendMessageAbortIfHung = 0x0002;
+    private const uint MessageTimeoutMilliseconds = 2000;
     private const string BackendWindowClass = "LumaShot.MessageWindow";
 
     public bool IsBackendAvailable => FindWindow(BackendWindowClass, null) != nint.Zero;
@@ -95,7 +98,15 @@ internal sealed partial class NativeBridge
     private static bool Post(uint message, nuint parameter)
     {
         nint window = FindWindow(BackendWindowClass, null);
-        return window != nint.Zero && PostMessage(window, message, parameter, 0);
+        return window != nint.Zero &&
+            SendMessageTimeout(
+                window,
+                message,
+                parameter,
+                0,
+                SendMessageAbortIfHung,
+                MessageTimeoutMilliseconds,
+                out _) != nint.Zero;
     }
 
     private static string? FindBackendExecutable()
@@ -148,7 +159,14 @@ internal sealed partial class NativeBridge
             Directory.CreateDirectory(runtimeDirectory);
             if (File.Exists(backendPath) && new FileInfo(backendPath).Length == resource.Length)
             {
-                return backendPath;
+                using FileStream existingBackend = File.OpenRead(backendPath);
+                byte[] embeddedHash = SHA256.HashData(resource);
+                byte[] existingHash = SHA256.HashData(existingBackend);
+                resource.Position = 0;
+                if (CryptographicOperations.FixedTimeEquals(embeddedHash, existingHash))
+                {
+                    return backendPath;
+                }
             }
 
             string temporaryPath = Path.Combine(runtimeDirectory, $"{BackendResourceName}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
@@ -185,7 +203,13 @@ internal sealed partial class NativeBridge
     [LibraryImport("user32.dll", EntryPoint = "FindWindowW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial nint FindWindow(string className, string? windowName);
 
-    [LibraryImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool PostMessage(nint window, uint message, nuint wParam, nint lParam);
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageTimeoutW", SetLastError = true)]
+    private static partial nint SendMessageTimeout(
+        nint window,
+        uint message,
+        nuint wParam,
+        nint lParam,
+        uint flags,
+        uint timeout,
+        out nuint result);
 }

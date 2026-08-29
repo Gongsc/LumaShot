@@ -3,12 +3,12 @@
   <h1>LumaShot</h1>
   <p>面向 HDR 及 HDR/SDR 混合桌面的 Windows 11 原生截图工具。</p>
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
-  <p><code>v0.1.0</code> · Windows 11 · x64</p>
+  <p><code>v0.1.1</code> · Windows 11 · x64</p>
 </div>
 
 ## 项目现状
 
-**v0.1.0 是可用的预览版本，项目仍在积极开发。** 截图、标注、HDR 校准、剪贴板和文件导出等核心流程已经实现，并通过自动化测试及真实 Windows Graphics Capture 冒烟测试。目前发布产物尚未签名。
+**v0.1.1 是可用的预览版本，项目仍在积极开发。** 截图、标注、HDR 校准、剪贴板和文件导出等核心流程已经实现，并通过自动化测试及真实 Windows Graphics Capture 冒烟测试。目前发布产物尚未签名。
 
 ## 主要功能
 
@@ -39,7 +39,7 @@
 .\scripts\package.ps1 -Version 0.1.1
 ```
 
-打包后会在 `artifacts` 中直接生成自包含的 `LumaShot-v<版本>-x64.exe` 和 `LumaShot-v<版本>-Setup-x64.exe`，不会生成 ZIP 压缩包。
+打包后会在 `artifacts` 中直接生成自包含的 `LumaShot.exe` 和 `LumaShot-v<版本>-Setup-x64.exe`。独立版必须保留 `LumaShot.exe` 这一规范文件名，WinUI 资源依赖该宿主名称；不会生成 ZIP 压缩包。
 
 技术细节请参阅 [HDR 指南](docs/HDR-Guide.md)和[测试矩阵](docs/TESTING.md)。受保护内容、DRM 内容及 Windows 安全桌面可能显示为黑色；LumaShot 不会绕过操作系统的捕获限制。
 

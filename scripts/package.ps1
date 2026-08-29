@@ -1,6 +1,6 @@
 param(
     [string]$CertificateThumbprint = '',
-    [string]$Version = '0.1.0'
+    [string]$Version = '0.1.1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,7 +10,8 @@ $publishDirectory = Join-Path $artifacts 'publish'
 $controlCenter = Join-Path $repoRoot 'src\LumaShot.ControlCenter\LumaShot.ControlCenter.csproj'
 $normalizedVersion = $Version.TrimStart('v')
 $versionLabel = "v$normalizedVersion"
-$standaloneExe = Join-Path $artifacts "LumaShot-$versionLabel-x64.exe"
+$standaloneExe = Join-Path $artifacts 'LumaShot.exe'
+$legacyVersionedStandaloneExe = Join-Path $artifacts "LumaShot-$versionLabel-x64.exe"
 $setupBaseName = "LumaShot-$versionLabel-Setup-x64"
 $setupExe = Join-Path $artifacts "$setupBaseName.exe"
 
@@ -61,6 +62,9 @@ if ($CertificateThumbprint) {
     if ($LASTEXITCODE -ne 0) { throw 'Authenticode signing failed.' }
 }
 Copy-Item -LiteralPath $publishedExe -Destination $standaloneExe -Force
+if (Test-Path -LiteralPath $legacyVersionedStandaloneExe) {
+    Remove-Item -LiteralPath $legacyVersionedStandaloneExe -Force
+}
 
 $legacyTargets = @(
     (Join-Path $artifacts 'LumaShot-portable-x64'),

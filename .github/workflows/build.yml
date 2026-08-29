@@ -52,7 +52,7 @@ jobs:
           $safeLabel = $label -replace '[^0-9A-Za-z._-]', '-'
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "ARTIFACT_LABEL=$safeLabel" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "STANDALONE_EXE=artifacts/LumaShot-$safeLabel-x64.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "STANDALONE_EXE=artifacts/LumaShot.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SETUP_BASENAME=LumaShot-$safeLabel-Setup-x64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SETUP_EXE=artifacts/LumaShot-$safeLabel-Setup-x64.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 

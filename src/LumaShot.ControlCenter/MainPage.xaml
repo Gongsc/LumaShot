@@ -116,7 +116,7 @@
                             x:Name="StartCaptureButton"
                             AutomationProperties.AutomationId="StartCaptureButton"
                             AutomationProperties.Name="开始截图"
-                            Command="{x:Bind ViewModel.CaptureSelectedCommand}"
+                            Click="StartCaptureButton_Click"
                             Style="{StaticResource AccentButtonStyle}">
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <Viewbox Width="22" Height="22">
@@ -368,9 +368,10 @@
                             </StackPanel>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="8">
                                 <Button
+                                    x:Name="HdrCalibrationButton"
                                     AutomationProperties.AutomationId="HdrCalibrationButton"
                                     AutomationProperties.Name="开始 HDR 校准"
-                                    Command="{x:Bind ViewModel.BeginCalibrationCommand}"
+                                    Click="HdrCalibrationButton_Click"
                                     Content="开始校准" />
                                 <Border
                                     Padding="8,3"
@@ -447,7 +448,7 @@
                     <TextBlock
                         Grid.Column="2"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="v0.1.0" />
+                        Text="v0.1.1" />
                 </Grid>
             </StackPanel>
         </ScrollViewer>

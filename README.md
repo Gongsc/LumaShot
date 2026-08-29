@@ -3,12 +3,12 @@
   <h1>LumaShot</h1>
   <p>A native Windows 11 screenshot tool for HDR and mixed HDR/SDR desktops.</p>
   <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
-  <p><code>v0.1.0</code> · Windows 11 · x64</p>
+  <p><code>v0.1.1</code> · Windows 11 · x64</p>
 </div>
 
 ## Project status
 
-**v0.1.0 is a usable preview under active development.** The core capture, annotation, HDR calibration, clipboard, and export workflows are implemented and covered by automated tests plus real Windows Graphics Capture smoke tests. Release binaries are currently unsigned.
+**v0.1.1 is a usable preview under active development.** The core capture, annotation, HDR calibration, clipboard, and export workflows are implemented and covered by automated tests plus real Windows Graphics Capture smoke tests. Release binaries are currently unsigned.
 
 ## Highlights
 
@@ -39,7 +39,7 @@ Keyboard shortcuts: `Enter` copy when enabled, `Ctrl+C` copy, `Ctrl+S` save, `Ct
 .\scripts\package.ps1 -Version 0.1.1
 ```
 
-Packaging creates a self-contained `LumaShot-v<version>-x64.exe` and `LumaShot-v<version>-Setup-x64.exe` in `artifacts`. No ZIP archive is produced.
+Packaging creates a self-contained `LumaShot.exe` and `LumaShot-v<version>-Setup-x64.exe` in `artifacts`. Keep the standalone executable named `LumaShot.exe`; WinUI resources rely on the canonical host name. No ZIP archive is produced.
 
 See the [HDR guide](docs/HDR-Guide.md) and [test matrix](docs/TESTING.md) for technical details. Protected or DRM content and the Windows secure desktop may appear black; LumaShot does not bypass operating-system capture restrictions.
 

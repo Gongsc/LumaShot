@@ -6,8 +6,8 @@ IDI_LUMASHOT_TRAY ICON "assets\\LumaShotTray.ico"
 IDR_TOOLBAR_ICONS RCDATA "assets\\toolbar-icons.png"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION 0,1,1,0
+ PRODUCTVERSION 0,1,1,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -23,11 +23,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "LumaShot Project"
             VALUE "FileDescription", "HDR-aware Windows screenshot tool"
-            VALUE "FileVersion", "0.1.0"
+            VALUE "FileVersion", "0.1.1"
             VALUE "InternalName", "LumaShot"
             VALUE "OriginalFilename", "LumaShot.exe"
             VALUE "ProductName", "LumaShot"
-            VALUE "ProductVersion", "0.1.0"
+            VALUE "ProductVersion", "0.1.1"
         END
     END
     BLOCK "VarFileInfo"

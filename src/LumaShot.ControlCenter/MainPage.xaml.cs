@@ -40,6 +40,30 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private async void StartCaptureButton_Click(object sender, RoutedEventArgs e)
+    {
+        StartCaptureButton.IsEnabled = false;
+        if (await ViewModel.CaptureSelectedAsync())
+        {
+            App.Window.Close();
+            return;
+        }
+
+        StartCaptureButton.IsEnabled = true;
+    }
+
+    private async void HdrCalibrationButton_Click(object sender, RoutedEventArgs e)
+    {
+        HdrCalibrationButton.IsEnabled = false;
+        if (await ViewModel.BeginCalibrationAsync())
+        {
+            App.Window.Close();
+            return;
+        }
+
+        HdrCalibrationButton.IsEnabled = true;
+    }
+
     private void HotkeyBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key is VirtualKey.Control or VirtualKey.Shift or VirtualKey.Menu or

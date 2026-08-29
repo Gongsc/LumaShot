@@ -1,9 +1,9 @@
 #define MyAppName "LumaShot"
 #ifndef MyAppVersion
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #endif
 #ifndef MyOutputBaseFilename
-#define MyOutputBaseFilename "LumaShot-v0.1.0-Setup-x64"
+#define MyOutputBaseFilename "LumaShot-v0.1.1-Setup-x64"
 #endif
 #define MyAppExeName "LumaShot.exe"
 

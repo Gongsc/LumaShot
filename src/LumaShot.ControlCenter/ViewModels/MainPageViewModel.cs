@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using LumaShot_ControlCenter.Models;
 using LumaShot_ControlCenter.Services;
 
@@ -98,35 +97,31 @@ public partial class MainPageViewModel : ObservableObject
         QueueSave();
     }
 
-    [RelayCommand]
-    private async Task CaptureSelectedAsync()
+    public async Task<bool> CaptureSelectedAsync()
     {
         await SaveAndReloadAsync();
         CaptureModeItem selected = CaptureModes.First(item => item.Id == SelectedCaptureModeId);
         if (_nativeBridge.Capture(selected.NativeValue))
         {
-            Environment.Exit(0);
+            return true;
         }
-        else
-        {
-            IsBackendReady = false;
-            BackendStatus = "截图服务不可用";
-        }
+
+        IsBackendReady = false;
+        BackendStatus = "截图服务不可用";
+        return false;
     }
 
-    [RelayCommand]
-    private async Task BeginCalibrationAsync()
+    public async Task<bool> BeginCalibrationAsync()
     {
         await SaveAndReloadAsync();
         if (_nativeBridge.BeginCalibration())
         {
-            Environment.Exit(0);
+            return true;
         }
-        else
-        {
-            IsBackendReady = false;
-            BackendStatus = "截图服务不可用";
-        }
+
+        IsBackendReady = false;
+        BackendStatus = "截图服务不可用";
+        return false;
     }
 
     partial void OnSelectedCaptureModeIdChanged(string value)
