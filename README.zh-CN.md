@@ -39,3 +39,7 @@
 ```
 
 技术细节请参阅 [HDR 指南](docs/HDR-Guide.md)和[测试矩阵](docs/TESTING.md)。受保护内容、DRM 内容及 Windows 安全桌面可能显示为黑色；LumaShot 不会绕过操作系统的捕获限制。
+
+## 许可证
+
+LumaShot 仅依据 [GNU 通用公共许可证第 3 版](LICENSE)（`GPL-3.0-only`）授权。

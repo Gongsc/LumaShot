@@ -14,6 +14,7 @@ if ($CertificateThumbprint) {
 Copy-Item $releaseExe $portable -Force
 Copy-Item (Join-Path $repoRoot 'README.md') $portable -Force
 Copy-Item (Join-Path $repoRoot 'README.zh-CN.md') $portable -Force
+Copy-Item (Join-Path $repoRoot 'LICENSE') $portable -Force
 Copy-Item (Join-Path $repoRoot 'docs') $portable -Recurse -Force
 Compress-Archive -Path (Join-Path $portable '*') -DestinationPath (Join-Path $artifacts 'LumaShot-portable-x64.zip') -Force
 $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue

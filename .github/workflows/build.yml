@@ -66,6 +66,7 @@ jobs:
           name: LumaShot-native-x64
           path: |
             bin/Release/LumaShot.exe
+            LICENSE
             README.md
             README.zh-CN.md
             docs/**
@@ -76,6 +77,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LumaShot-control-center-x64
-          path: src/LumaShot.ControlCenter/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64/**
+          path: |
+            src/LumaShot.ControlCenter/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64/**
+            LICENSE
           if-no-files-found: error
           retention-days: 14

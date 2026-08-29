@@ -39,3 +39,7 @@ Keyboard shortcuts: `Enter` copy when enabled, `Ctrl+C` copy, `Ctrl+S` save, `Ct
 ```
 
 See the [HDR guide](docs/HDR-Guide.md) and [test matrix](docs/TESTING.md) for technical details. Protected or DRM content and the Windows secure desktop may appear black; LumaShot does not bypass operating-system capture restrictions.
+
+## License
+
+LumaShot is licensed under the [GNU General Public License version 3](LICENSE) only (`GPL-3.0-only`).

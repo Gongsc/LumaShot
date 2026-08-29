@@ -20,6 +20,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 WizardStyle=modern
 MinVersion=10.0.22621
 SetupIconFile=..\src\LumaShot.App\assets\LumaShot.ico
+LicenseFile=..\LICENSE
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -32,6 +33,7 @@ Name: "startup"; Description: "{cm:StartupTask}"; GroupDescription: "{cm:Additio
 Source: "..\bin\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
