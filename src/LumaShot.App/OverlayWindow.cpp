@@ -902,8 +902,17 @@ void OverlayWindow::rebuildButtons() {
         }
     }
 
+    const auto isDisplayed = [&](int id) {
+        const auto contains = [id](const std::vector<Button>& buttons) {
+            return std::ranges::any_of(buttons, [id](const Button& button) { return button.id == id; });
+        };
+        return contains(modeButtons_) || contains(toolButtons_);
+    };
     for (const auto& definition : ButtonDefinitions) {
-        if (HWND control = GetDlgItem(hwnd_, definition.first)) ShowWindow(control, SW_HIDE);
+        if (HWND control = GetDlgItem(hwnd_, definition.first);
+            control && !isDisplayed(definition.first) && IsWindowVisible(control)) {
+            ShowWindow(control, SW_HIDE);
+        }
     }
     const auto positionControls = [&](const std::vector<Button>& buttons) {
         for (const auto& button : buttons) {
@@ -919,8 +928,16 @@ void OverlayWindow::rebuildButtons() {
                                 (button.id == ToolText && tool_ == AnnotationTool::Text);
             const bool enabled = (button.id != ToolUndo || annotations_.canUndo()) &&
                                  (button.id != ToolRedo || annotations_.canRedo());
-            EnableWindow(control, enabled);
-            SendMessageW(control, BM_SETCHECK, active ? BST_CHECKED : BST_UNCHECKED, 0);
+            bool changed = false;
+            if ((IsWindowEnabled(control) != FALSE) != enabled) {
+                EnableWindow(control, enabled);
+                changed = true;
+            }
+            const LRESULT checkState = active ? BST_CHECKED : BST_UNCHECKED;
+            if (SendMessageW(control, BM_GETCHECK, 0, 0) != checkState) {
+                SendMessageW(control, BM_SETCHECK, checkState, 0);
+                changed = true;
+            }
             std::wstring accessibleName(Localized(button.label, language_));
             if (active)
                 accessibleName += L" (" + std::wstring(Localized(StringId::Selected, language_)) + L")";
@@ -933,10 +950,29 @@ void OverlayWindow::rebuildButtons() {
                                   std::to_wstring(static_cast<int>(AnnotationWidths[lineWidthIndex_])) +
                                   L" px)";
             }
-            SetWindowTextW(control, accessibleName.c_str());
-            MoveWindow(control, button.rect.left, button.rect.top,
-                       button.rect.right - button.rect.left, button.rect.bottom - button.rect.top, TRUE);
-            ShowWindow(control, SW_SHOWNOACTIVATE);
+            const int currentTextLength = GetWindowTextLengthW(control);
+            std::wstring currentText(static_cast<std::size_t>(currentTextLength) + 1, L'\0');
+            GetWindowTextW(control, currentText.data(), currentTextLength + 1);
+            currentText.resize(static_cast<std::size_t>(currentTextLength));
+            if (currentText != accessibleName) {
+                SetWindowTextW(control, accessibleName.c_str());
+                changed = true;
+            }
+
+            RECT currentRect{};
+            GetWindowRect(control, &currentRect);
+            MapWindowPoints(HWND_DESKTOP, hwnd_, reinterpret_cast<POINT*>(&currentRect), 2);
+            if (!EqualRect(&currentRect, &button.rect)) {
+                SetWindowPos(control, nullptr, button.rect.left, button.rect.top,
+                             button.rect.right - button.rect.left, button.rect.bottom - button.rect.top,
+                             SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW);
+                changed = true;
+            }
+            if (!IsWindowVisible(control)) {
+                ShowWindow(control, SW_SHOWNOACTIVATE);
+                changed = true;
+            }
+            if (changed) RedrawButtonNow(control);
         }
     };
     positionControls(modeButtons_);
