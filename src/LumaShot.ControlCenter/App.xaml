@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="LumaShot_ControlCenter.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:LumaShot_ControlCenter">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="CaptureModeSelectedBackgroundBrush" Color="#E5F3FF" />
+                    <SolidColorBrush x:Key="CaptureModeSelectedBorderBrush" Color="#2E91DD" />
+                    <SolidColorBrush x:Key="StatusReadyBrush" Color="#3BA55D" />
+                    <SolidColorBrush x:Key="StatusUnavailableBrush" Color="#C42B1C" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="CaptureModeSelectedBackgroundBrush" Color="#153A58" />
+                    <SolidColorBrush x:Key="CaptureModeSelectedBorderBrush" Color="#4CACF7" />
+                    <SolidColorBrush x:Key="StatusReadyBrush" Color="#6CCB83" />
+                    <SolidColorBrush x:Key="StatusUnavailableBrush" Color="#FF8B80" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <StaticResource x:Key="CaptureModeSelectedBackgroundBrush" ResourceKey="SystemColorHighlightColorBrush" />
+                    <StaticResource x:Key="CaptureModeSelectedBorderBrush" ResourceKey="SystemColorHighlightTextColorBrush" />
+                    <StaticResource x:Key="StatusReadyBrush" ResourceKey="SystemColorHotlightColorBrush" />
+                    <StaticResource x:Key="StatusUnavailableBrush" ResourceKey="SystemColorWindowTextColorBrush" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

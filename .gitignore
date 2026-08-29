@@ -3,6 +3,47 @@ bin/
 obj/
 artifacts/
 x64/
+[Dd]ebug/
+[Rr]elease/
+
+# .NET / Visual Studio
+*.userosscache
+*.sln.docstates
+*.binlog
+[Ll]og/
+[Ll]ogs/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# NuGet and publish output
+*.nupkg
+*.snupkg
+*.nuget.props
+*.nuget.targets
+project.lock.json
+publish/
+*.pubxml
+PublishScripts/
+
+# MSIX packaging output
+AppPackages/
+BundleArtifacts/
+*.msix
+*.msixupload
+*.appx
+*.appxbundle
+*.appxupload
+
+# IDE and generated files
+.idea/
+_ReSharper*/
+*.DotSettings.user
+*.dotCover
+Generated Files/
+*_wpftmp.csproj
+
 src/LumaShot.App/assets/LumaShot.ico
 src/LumaShot.App/assets/LumaShotTray.ico
 *.user

@@ -11,6 +11,8 @@
 #include "resource.h"
 #include <LumaShot/Localization.h>
 #include <shellapi.h>
+#include <shobjidl_core.h>
+#include <array>
 #include <filesystem>
 #include <utility>
 #include <winrt/base.h>
@@ -41,7 +43,10 @@ App::App(HINSTANCE instance) : instance_(instance), settings_(settingsStore_.loa
 
 App::~App() {
     if (captureThread_.joinable()) captureThread_.request_stop();
-    if (hwnd_) UnregisterHotKey(hwnd_, HotkeyId);
+    if (hwnd_) {
+        KillTimer(hwnd_, DeferredCaptureTimerId);
+        UnregisterHotKey(hwnd_, HotkeyId);
+    }
     removeTrayIcon();
     if (appIcon_ && appIcon_ != LoadIconW(nullptr, IDI_APPLICATION)) DestroyIcon(appIcon_);
 }
@@ -69,7 +74,22 @@ LRESULT CALLBACK App::WindowProc(HWND window, UINT message, WPARAM wparam, LPARA
 
 LRESULT App::handleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     if (message == ActivateMessage) { beginCapture(settings_.lastCaptureMode); return 0; }
+    if (message == ShowControlCenterMessage) { showControlCenter(); return 0; }
+    if (message == CaptureModeMessage) {
+        if (wparam <= static_cast<WPARAM>(CaptureMode::VirtualDesktop))
+            scheduleCapture(static_cast<CaptureMode>(wparam), false);
+        return 0;
+    }
+    if (message == ReloadSettingsMessage) { reloadSettings(); return 0; }
+    if (message == BeginCalibrationMessage) { scheduleCapture(CaptureMode::VirtualDesktop, true); return 0; }
     switch (message) {
+    case WM_TIMER:
+        if (wparam == DeferredCaptureTimerId) {
+            KillTimer(hwnd_, DeferredCaptureTimerId);
+            beginCapture(deferredCaptureMode_, deferredCalibration_);
+            return 0;
+        }
+        return DefWindowProcW(hwnd_, message, wparam, lparam);
     case WM_HOTKEY: if (wparam == HotkeyId) beginCapture(settings_.lastCaptureMode); return 0;
     case TrayMessage:
         if (LOWORD(lparam) == WM_LBUTTONDBLCLK) beginCapture(settings_.lastCaptureMode);
@@ -79,7 +99,7 @@ LRESULT App::handleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         switch (LOWORD(wparam)) {
         case MenuCapture: beginCapture(settings_.lastCaptureMode); break; case MenuRegion: beginCapture(CaptureMode::Region); break;
         case MenuWindow: beginCapture(CaptureMode::Window); break; case MenuMonitor: beginCapture(CaptureMode::Monitor); break;
-        case MenuAll: beginCapture(CaptureMode::VirtualDesktop); break; case MenuSettings: showSettings(); break;
+        case MenuAll: beginCapture(CaptureMode::VirtualDesktop); break; case MenuSettings: showControlCenter(); break;
         case MenuExit: DestroyWindow(hwnd_); break;
         }
         return 0;
@@ -130,6 +150,15 @@ void App::beginCapture(CaptureMode mode) {
 
 void App::beginCalibration() {
     beginCapture(CaptureMode::VirtualDesktop, true);
+}
+
+void App::scheduleCapture(CaptureMode mode, bool calibration) {
+    deferredCaptureMode_ = mode;
+    deferredCalibration_ = calibration;
+    KillTimer(hwnd_, DeferredCaptureTimerId);
+    if (!SetTimer(hwnd_, DeferredCaptureTimerId, 160, nullptr)) {
+        beginCapture(mode, calibration);
+    }
 }
 
 void App::beginCapture(CaptureMode mode, bool calibration) {
@@ -238,6 +267,48 @@ void App::showSettings() {
     settings_ = window.settings(); language_ = ResolveLanguage(settings_.language);
     (void)settingsStore_.save(settings_); applyStartupSetting(); registerHotkey();
     if (window.calibrationRequested()) beginCalibration();
+}
+
+void App::showControlCenter() {
+    wchar_t executablePath[MAX_PATH]{};
+    const DWORD length = GetModuleFileNameW(nullptr, executablePath, ARRAYSIZE(executablePath));
+    if (length > 0 && length < ARRAYSIZE(executablePath)) {
+        std::filesystem::path directory = std::filesystem::path(executablePath).parent_path();
+        const std::array candidates{
+            directory / L"LumaShot.ControlCenter.exe",
+            directory / L"ControlCenter" / L"LumaShot.ControlCenter.exe",
+        };
+        for (const auto& candidate : candidates) {
+            if (!std::filesystem::exists(candidate)) continue;
+            const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
+                hwnd_, L"open", candidate.c_str(), nullptr, directory.c_str(), SW_SHOWNORMAL));
+            if (result > 32) return;
+        }
+    }
+
+    IApplicationActivationManager* activationManager = nullptr;
+    const HRESULT createResult = CoCreateInstance(
+        CLSID_ApplicationActivationManager, nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&activationManager));
+    if (SUCCEEDED(createResult)) {
+        DWORD processId = 0;
+        const HRESULT activationResult = activationManager->ActivateApplication(
+            L"ABC3209F-970D-49C6-AF3B-A8C18E5EE985_1z32rh13vfry6!App",
+            nullptr, AO_NONE, &processId);
+        activationManager->Release();
+        if (SUCCEEDED(activationResult)) return;
+    }
+
+    // Development and portable builds without the WinUI companion keep the
+    // legacy settings surface as a functional fallback.
+    showSettings();
+}
+
+void App::reloadSettings() {
+    settings_ = settingsStore_.load();
+    language_ = ResolveLanguage(settings_.language);
+    applyStartupSetting();
+    registerHotkey();
 }
 
 void App::applyStartupSetting() noexcept {

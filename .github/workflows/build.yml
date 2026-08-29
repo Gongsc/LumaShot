@@ -1,0 +1,81 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-x64:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      CONFIGURATION: Release
+      PLATFORM: x64
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native application and tests
+        shell: pwsh
+        run: >-
+          msbuild LumaShot.sln
+          /m
+          /p:Configuration=$env:CONFIGURATION
+          /p:Platform=$env:PLATFORM
+          /v:minimal
+
+      - name: Build WinUI 3 control center
+        shell: pwsh
+        run: >-
+          dotnet build src/LumaShot.ControlCenter/LumaShot.ControlCenter.csproj
+          --configuration $env:CONFIGURATION
+          --runtime win-x64
+          -p:Platform=$env:PLATFORM
+          -p:ContinuousIntegrationBuild=true
+          --verbosity minimal
+
+      - name: Run native tests
+        shell: pwsh
+        run: ./bin/Release/LumaShot.Tests.exe
+
+      - name: Upload native application
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaShot-native-x64
+          path: |
+            bin/Release/LumaShot.exe
+            README.md
+            README.zh-CN.md
+            docs/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload WinUI 3 control center
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaShot-control-center-x64
+          path: src/LumaShot.ControlCenter/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64/**
+          if-no-files-found: error
+          retention-days: 14

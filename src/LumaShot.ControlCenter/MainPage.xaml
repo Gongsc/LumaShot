@@ -1,0 +1,455 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="LumaShot_ControlCenter.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:LumaShot_ControlCenter"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Loaded="Page_Loaded"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <Style
+            x:Key="ModeCardButtonStyle"
+            BasedOn="{StaticResource DefaultButtonStyle}"
+            TargetType="Button">
+            <Setter Property="MinHeight" Value="124" />
+            <Setter Property="Padding" Value="18" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+        </Style>
+        <Style x:Key="SurfaceCardStyle" TargetType="Border">
+            <Setter Property="Padding" Value="24" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{ThemeResource OverlayCornerRadius}" />
+        </Style>
+        <Style x:Key="SectionTitleStyle" BasedOn="{StaticResource SubtitleTextBlockStyle}" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Page.Resources>
+
+    <Grid
+        x:Name="PageRoot"
+        Background="{ThemeResource LayerFillColorDefaultBrush}">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="HeaderStates">
+                <VisualState x:Name="CompactHeader" />
+                <VisualState x:Name="WideHeader">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="720" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="HeaderActionPanel.(Grid.Row)" Value="0" />
+                        <Setter Target="HeaderActionPanel.(Grid.Column)" Value="1" />
+                        <Setter Target="HeaderActionPanel.Margin" Value="20,0,0,0" />
+                        <Setter Target="HeaderActionPanel.HorizontalAlignment" Value="Right" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+            <VisualStateGroup x:Name="ContentStates">
+                <VisualState x:Name="CompactContent" />
+                <VisualState x:Name="WideContent">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="1000" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="ModeThirdColumn.Width" Value="*" />
+                        <Setter Target="ModeFourthColumn.Width" Value="*" />
+                        <Setter Target="MonitorModeButton.(Grid.Row)" Value="0" />
+                        <Setter Target="MonitorModeButton.(Grid.Column)" Value="2" />
+                        <Setter Target="DesktopModeButton.(Grid.Row)" Value="0" />
+                        <Setter Target="DesktopModeButton.(Grid.Column)" Value="3" />
+                        <Setter Target="SecondSettingsColumn.Width" Value="*" />
+                        <Setter Target="CaptureSettingsCard.(Grid.RowSpan)" Value="2" />
+                        <Setter Target="HdrCard.(Grid.Row)" Value="0" />
+                        <Setter Target="HdrCard.(Grid.Column)" Value="1" />
+                        <Setter Target="GeneralCard.(Grid.Row)" Value="1" />
+                        <Setter Target="GeneralCard.(Grid.Column)" Value="1" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel
+                MaxWidth="1220"
+                Padding="32,30,32,22"
+                HorizontalAlignment="Stretch"
+                Spacing="24">
+                <Grid x:Name="HeaderGrid">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel MaxWidth="680" Spacing="8">
+                        <TextBlock
+                            FontSize="34"
+                            FontWeight="SemiBold"
+                            Text="捕捉每一束光" />
+                        <TextBlock
+                            FontSize="16"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="为 HDR 与 SDR 桌面打造的原生截图体验"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel
+                        x:Name="HeaderActionPanel"
+                        Grid.Row="1"
+                        Margin="0,18,0,0"
+                        HorizontalAlignment="Left"
+                        Spacing="6">
+                        <Button
+                            x:Name="StartCaptureButton"
+                            AutomationProperties.AutomationId="StartCaptureButton"
+                            AutomationProperties.Name="开始截图"
+                            Command="{x:Bind ViewModel.CaptureSelectedCommand}"
+                            Style="{StaticResource AccentButtonStyle}">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Viewbox Width="22" Height="22">
+                                    <Canvas Width="24" Height="24">
+                                        <Path
+                                            Data="M 8,3 L 5,3 C 3.9,3 3,3.9 3,5 L 3,8 M 16,3 L 19,3 C 20.1,3 21,3.9 21,5 L 21,8 M 21,16 L 21,19 C 21,20.1 20.1,21 19,21 L 16,21 M 8,21 L 5,21 C 3.9,21 3,20.1 3,19 L 3,16"
+                                            Stroke="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                            StrokeEndLineCap="Round"
+                                            StrokeLineJoin="Round"
+                                            StrokeStartLineCap="Round"
+                                            StrokeThickness="1.8" />
+                                    </Canvas>
+                                </Viewbox>
+                                <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="开始截图" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.HotkeyDisplay, Mode=OneWay}" />
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Spacing="12">
+                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="选择截图方式" />
+                    <Grid x:Name="ModeGrid" ColumnSpacing="10" RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition x:Name="ModeThirdColumn" Width="0" />
+                            <ColumnDefinition x:Name="ModeFourthColumn" Width="0" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button
+                            x:Name="RegionModeButton"
+                            Tag="region"
+                            AutomationProperties.AutomationId="RegionModeButton"
+                            AutomationProperties.Name="矩形区域，自由框选"
+                            Click="ModeCard_Click"
+                            Style="{StaticResource ModeCardButtonStyle}">
+                            <Grid ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Viewbox Width="34" Height="34" VerticalAlignment="Center">
+                                    <Canvas Width="24" Height="24">
+                                        <Path
+                                            Data="M 8,3 L 5,3 C 3.9,3 3,3.9 3,5 L 3,8 M 16,3 L 19,3 C 20.1,3 21,3.9 21,5 L 21,8 M 21,16 L 21,19 C 21,20.1 20.1,21 19,21 L 16,21 M 8,21 L 5,21 C 3.9,21 3,20.1 3,19 L 3,16"
+                                            Stroke="{x:Bind RegionModeButton.Foreground, Mode=OneWay}"
+                                            StrokeEndLineCap="Round"
+                                            StrokeLineJoin="Round"
+                                            StrokeStartLineCap="Round"
+                                            StrokeThickness="1.8" />
+                                    </Canvas>
+                                </Viewbox>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="矩形区域" />
+                                    <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="自由框选" />
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+
+                        <Button
+                            x:Name="WindowModeButton"
+                            Grid.Column="1"
+                            Tag="window"
+                            AutomationProperties.AutomationId="WindowModeButton"
+                            AutomationProperties.Name="窗口，选择应用窗口"
+                            Click="ModeCard_Click"
+                            Style="{StaticResource ModeCardButtonStyle}">
+                            <Grid ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Viewbox Width="34" Height="34" VerticalAlignment="Center">
+                                    <Canvas Width="24" Height="24">
+                                        <Path
+                                            Data="M 5.5,4 L 18.5,4 C 19.9,4 21,5.1 21,6.5 L 21,17.5 C 21,18.9 19.9,20 18.5,20 L 5.5,20 C 4.1,20 3,18.9 3,17.5 L 3,6.5 C 3,5.1 4.1,4 5.5,4 Z M 3,8.5 L 21,8.5"
+                                            Stroke="{x:Bind WindowModeButton.Foreground, Mode=OneWay}"
+                                            StrokeEndLineCap="Round"
+                                            StrokeLineJoin="Round"
+                                            StrokeStartLineCap="Round"
+                                            StrokeThickness="1.8" />
+                                    </Canvas>
+                                </Viewbox>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="窗口" />
+                                    <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="选择应用窗口" />
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+
+                        <Button
+                            x:Name="MonitorModeButton"
+                            Grid.Row="1"
+                            Tag="monitor"
+                            AutomationProperties.AutomationId="MonitorModeButton"
+                            AutomationProperties.Name="当前屏幕，捕捉所在显示器"
+                            Click="ModeCard_Click"
+                            Style="{StaticResource ModeCardButtonStyle}">
+                            <Grid ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Viewbox Width="34" Height="34" VerticalAlignment="Center">
+                                    <Canvas Width="24" Height="24">
+                                        <Path
+                                            Data="M 5.5,4 L 18.5,4 C 19.9,4 21,5.1 21,6.5 L 21,15.5 C 21,16.9 19.9,18 18.5,18 L 5.5,18 C 4.1,18 3,16.9 3,15.5 L 3,6.5 C 3,5.1 4.1,4 5.5,4 Z M 12,18 L 12,21 M 9,21 L 15,21"
+                                            Stroke="{x:Bind MonitorModeButton.Foreground, Mode=OneWay}"
+                                            StrokeEndLineCap="Round"
+                                            StrokeLineJoin="Round"
+                                            StrokeStartLineCap="Round"
+                                            StrokeThickness="1.8" />
+                                    </Canvas>
+                                </Viewbox>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="当前屏幕" />
+                                    <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="捕捉所在显示器" />
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+
+                        <Button
+                            x:Name="DesktopModeButton"
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Tag="virtualDesktop"
+                            AutomationProperties.AutomationId="DesktopModeButton"
+                            AutomationProperties.Name="全部屏幕，覆盖整个桌面"
+                            Click="ModeCard_Click"
+                            Style="{StaticResource ModeCardButtonStyle}">
+                            <Grid ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Viewbox Width="34" Height="34" VerticalAlignment="Center">
+                                    <Canvas Width="24" Height="24">
+                                        <Path
+                                            Data="M 4.5,5 L 12.5,5 C 13.6,5 14.5,5.9 14.5,7 L 14.5,13 C 14.5,14.1 13.6,15 12.5,15 L 4.5,15 C 3.4,15 2.5,14.1 2.5,13 L 2.5,7 C 2.5,5.9 3.4,5 4.5,5 Z M 11.5,8 L 19.5,8 C 20.6,8 21.5,8.9 21.5,10 L 21.5,16 C 21.5,17.1 20.6,18 19.5,18 L 11.5,18 C 10.4,18 9.5,17.1 9.5,16 M 8.5,15 L 8.5,18 M 6.5,18 L 10.5,18 M 15.5,18 L 15.5,21 M 13.5,21 L 17.5,21"
+                                            Stroke="{x:Bind DesktopModeButton.Foreground, Mode=OneWay}"
+                                            StrokeEndLineCap="Round"
+                                            StrokeLineJoin="Round"
+                                            StrokeStartLineCap="Round"
+                                            StrokeThickness="1.8" />
+                                    </Canvas>
+                                </Viewbox>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="全部屏幕" />
+                                    <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="覆盖整个桌面" />
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+
+                <Grid x:Name="SettingsGrid" ColumnSpacing="14" RowSpacing="14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="SecondSettingsColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border x:Name="CaptureSettingsCard" Style="{StaticResource SurfaceCardStyle}">
+                        <StackPanel Spacing="18">
+                            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="截图与快捷键" />
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="全局快捷键" />
+                                <TextBox
+                                    x:Name="HotkeyBox"
+                                    AutomationProperties.AutomationId="HotkeyBox"
+                                    AutomationProperties.HelpText="聚焦后按下新的快捷键组合"
+                                    AutomationProperties.Name="全局快捷键"
+                                    IsReadOnly="True"
+                                    KeyDown="HotkeyBox_KeyDown"
+                                    Text="{x:Bind ViewModel.HotkeyDisplay, Mode=OneWay}" />
+                            </StackPanel>
+                            <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="包含鼠标指针" />
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="IncludeCursorToggle"
+                                    AutomationProperties.Name="包含鼠标指针"
+                                    IsOn="{x:Bind ViewModel.IncludeCursor, Mode=TwoWay}" />
+                            </Grid>
+                            <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="按回车复制截图" />
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="CopyOnEnterToggle"
+                                    AutomationProperties.Name="按回车复制截图"
+                                    IsOn="{x:Bind ViewModel.CopyOnEnter, Mode=TwoWay}" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border
+                        x:Name="HdrCard"
+                        Grid.Row="1"
+                        Style="{StaticResource SurfaceCardStyle}">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="7">
+                                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="HDR 校准" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="预览并调整 HDR 到 SDR 的转换"
+                                    TextWrapping="Wrap" />
+                                <Viewbox Height="72" HorizontalAlignment="Stretch" Stretch="Fill">
+                                    <Canvas Width="250" Height="72">
+                                        <Path
+                                            Data="M 5,64 C 44,62 67,34 101,25 C 137,15 177,13 245,11"
+                                            Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                                            StrokeEndLineCap="Round"
+                                            StrokeThickness="2.2" />
+                                        <Path
+                                            Data="M 5,64 L 245,64 M 5,64 L 5,8 M 245,64 L 245,8"
+                                            Opacity="0.45"
+                                            Stroke="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                            StrokeDashArray="3,3"
+                                            StrokeThickness="1" />
+                                    </Canvas>
+                                </Viewbox>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="8">
+                                <Button
+                                    AutomationProperties.AutomationId="HdrCalibrationButton"
+                                    AutomationProperties.Name="开始 HDR 校准"
+                                    Command="{x:Bind ViewModel.BeginCalibrationCommand}"
+                                    Content="开始校准" />
+                                <Border
+                                    Padding="8,3"
+                                    Background="{ThemeResource CaptureModeSelectedBackgroundBrush}"
+                                    CornerRadius="{ThemeResource ControlCornerRadius}">
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                        Text="推荐" />
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        x:Name="GeneralCard"
+                        Grid.Row="2"
+                        Style="{StaticResource SurfaceCardStyle}">
+                        <StackPanel Spacing="16">
+                            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="常规" />
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="200" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="语言" />
+                                <ComboBox
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="LanguageCombo"
+                                    AutomationProperties.Name="语言"
+                                    HorizontalAlignment="Stretch"
+                                    SelectedIndex="{x:Bind ViewModel.LanguageIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="跟随系统" />
+                                    <ComboBoxItem Content="简体中文" />
+                                    <ComboBoxItem Content="English" />
+                                </ComboBox>
+                            </Grid>
+                            <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="开机启动" />
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="LaunchAtLoginToggle"
+                                    AutomationProperties.Name="开机启动"
+                                    IsOn="{x:Bind ViewModel.LaunchAtLogin, Mode=TwoWay}" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Margin="0,2,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse
+                        x:Name="BackendStatusDot"
+                        Width="9"
+                        Height="9"
+                        VerticalAlignment="Center"
+                        Fill="{ThemeResource StatusReadyBrush}" />
+                    <TextBlock
+                        Grid.Column="1"
+                        Margin="9,0,0,0"
+                        AutomationProperties.AutomationId="BackendStatusText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.BackendStatus, Mode=OneWay}" />
+                    <TextBlock
+                        Grid.Column="2"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="v0.1.0" />
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="24" viewBox="0 0 360 24">
+  <g fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/></g>
+  <g transform="translate(24)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M4 8.5h16"/><path stroke-linecap="round" d="M7 6.5h.01M10 6.5h.01"/></g>
+  <g transform="translate(48)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M9 21h6M12 17v4"/></g>
+  <g transform="translate(72)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="12.5" height="10" rx="2"/><rect x="9" y="8" width="12.5" height="10" rx="2"/><path d="M5.5 18h6M8.5 14v4M13 21h5M15.5 18v3"/></g>
+  <g transform="translate(96)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 1.2-4.5L16.6 4.1a2 2 0 0 1 2.8 0l.5.5a2 2 0 0 1 0 2.8L8.5 18.8 4 20Z"/><path d="m14.8 5.9 3.3 3.3M5.2 15.5l3.3 3.3"/></g>
+  <g transform="translate(120)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path fill="#F7FAFC" stroke="none" d="M3 4h3v3H3zM18 4h3v3h-3zM3 17h3v3H3zM18 17h3v3h-3z"/></g>
+  <g transform="translate(144)" fill="none" stroke="#F7FAFC" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19 19 5M11 5h8v8"/><circle cx="5" cy="19" r="1.5" fill="#F7FAFC" stroke="none"/></g>
+  <g transform="translate(168)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V4h14v3M12 4v16M9 20h6"/></g>
+  <g transform="translate(192)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7-4 4 4 4"/><path d="M5 11h8.5a5.5 5.5 0 0 1 5.5 5.5V18"/></g>
+  <g transform="translate(216)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m16 7 4 4-4 4"/><path d="M19 11h-8.5A5.5 5.5 0 0 0 5 16.5V18"/></g>
+  <g transform="translate(240)"><circle cx="8" cy="9" r="4" fill="#63D8F2"/><circle cx="16" cy="9" r="4" fill="#FF6F91"/><circle cx="12" cy="15.5" r="4" fill="#FFD166"/><path d="M9.6 12.7a4 4 0 0 1 4.8 0A4 4 0 0 1 12 13.8a4 4 0 0 1-2.4-1.1Z" fill="#F7FAFC" fill-opacity=".9"/></g>
+  <g transform="translate(264)" fill="none" stroke="#F7FAFC" stroke-linecap="round"><path d="M5 7h14" stroke-width="1.2"/><path d="M5 12h14" stroke-width="2"/><path d="M5 18h14" stroke-width="3"/></g>
+  <g transform="translate(288)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></g>
+  <g transform="translate(312)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10M8 10l4 4 4-4"/><path d="M5 17v2a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2"/></g>
+  <g transform="translate(336)" fill="none" stroke="#F7FAFC" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="m9 9 6 6M15 9l-6 6"/></g>
+</svg>

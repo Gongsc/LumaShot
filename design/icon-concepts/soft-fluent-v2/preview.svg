@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="156" viewBox="0 0 840 156">
+  <rect width="840" height="156" rx="24" fill="#202124"/>
+  <text x="32" y="37" fill="#F7FAFC" font-family="Segoe UI, sans-serif" font-size="18" font-weight="600">Soft Fluent · screenshot toolbar icons</text>
+  <rect x="28" y="59" width="784" height="68" rx="16" fill="#303134" stroke="#46484A"/>
+  <image href="toolbar-atlas.svg" x="54" y="81" width="720" height="48"/>
+</svg>

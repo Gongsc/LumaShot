@@ -8,6 +8,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LumaShot.App", "src\LumaSho
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LumaShot.Tests", "tests\LumaShot.Tests\LumaShot.Tests.vcxproj", "{B8B4C874-8EA7-4AFE-855F-DF70F27D1D13}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LumaShot.ControlCenter", "src\LumaShot.ControlCenter\LumaShot.ControlCenter.csproj", "{3C8F1D5D-7BB2-4EB8-8D1D-D9D1189F7B8A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -26,9 +28,10 @@ Global
 		{B8B4C874-8EA7-4AFE-855F-DF70F27D1D13}.Debug|x64.Build.0 = Debug|x64
 		{B8B4C874-8EA7-4AFE-855F-DF70F27D1D13}.Release|x64.ActiveCfg = Release|x64
 		{B8B4C874-8EA7-4AFE-855F-DF70F27D1D13}.Release|x64.Build.0 = Release|x64
+		{3C8F1D5D-7BB2-4EB8-8D1D-D9D1189F7B8A}.Debug|x64.ActiveCfg = Debug|x64
+		{3C8F1D5D-7BB2-4EB8-8D1D-D9D1189F7B8A}.Release|x64.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 EndGlobal
-

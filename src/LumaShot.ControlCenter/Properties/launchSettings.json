@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "LumaShot.ControlCenter (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "LumaShot.ControlCenter (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

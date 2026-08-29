@@ -20,6 +20,10 @@ public:
     int run();
     static constexpr wchar_t WindowClassName[] = L"LumaShot.MessageWindow";
     static constexpr UINT ActivateMessage = WM_APP + 72;
+    static constexpr UINT ShowControlCenterMessage = WM_APP + 73;
+    static constexpr UINT CaptureModeMessage = WM_APP + 74;
+    static constexpr UINT ReloadSettingsMessage = WM_APP + 75;
+    static constexpr UINT BeginCalibrationMessage = WM_APP + 76;
 
 private:
     struct CapturePayload {
@@ -31,6 +35,7 @@ private:
     static constexpr UINT TrayMessage = WM_APP + 1;
     static constexpr UINT CaptureReadyMessage = WM_APP + 2;
     static constexpr UINT_PTR TrayId = 1;
+    static constexpr UINT_PTR DeferredCaptureTimerId = 2;
     static constexpr int HotkeyId = 1;
 
     HINSTANCE instance_{};
@@ -43,6 +48,8 @@ private:
     SettingsWindow* settingsWindow_{};
     std::atomic_bool capturing_{false};
     std::jthread captureThread_;
+    CaptureMode deferredCaptureMode_{CaptureMode::Region};
+    bool deferredCalibration_{};
 
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     LRESULT handleMessage(UINT message, WPARAM wparam, LPARAM lparam);
@@ -53,9 +60,12 @@ private:
     void registerHotkey();
     void beginCapture(CaptureMode mode);
     void beginCapture(CaptureMode mode, bool calibration);
+    void scheduleCapture(CaptureMode mode, bool calibration);
     void beginCalibration();
     void finishCapture(std::unique_ptr<CapturePayload> payload);
     void showSettings();
+    void showControlCenter();
+    void reloadSettings();
     void applyStartupSetting() noexcept;
     bool exportCapture(HWND owner, OverlayAction action, const CaptureFrameSet& frames, RectI selection,
                        const AnnotationDocument& annotations, HdrCalibration calibration);

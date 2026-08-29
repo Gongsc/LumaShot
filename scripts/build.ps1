@@ -17,6 +17,13 @@ $arguments = @("`"$solution`"", '/m:1', "/p:Configuration=$Configuration", '/p:P
 $build = Start-Process -FilePath $msbuild -ArgumentList $arguments -UseNewEnvironment -NoNewWindow -PassThru
 $build.WaitForExit()
 if ($build.ExitCode -ne 0) { exit $build.ExitCode }
+
+$winapp = Get-Command winapp -ErrorAction SilentlyContinue
+if (-not $winapp) { throw 'WinApp CLI 0.6 or newer is required.' }
+$controlCenter = Join-Path $repoRoot 'src\LumaShot.ControlCenter\LumaShot.ControlCenter.csproj'
+& $winapp.Source run $controlCenter --no-launch --arch x64 --configuration $Configuration
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 if ($RunTests) {
     & (Join-Path $repoRoot "bin\$Configuration\LumaShot.Tests.exe")
     exit $LASTEXITCODE
