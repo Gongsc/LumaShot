@@ -1,0 +1,225 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="820" viewBox="0 0 1600 820">
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F7F9FC"/>
+      <stop offset="1" stop-color="#E9EEF5"/>
+    </linearGradient>
+    <linearGradient id="lightScene" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E9F5FC"/>
+      <stop offset="0.5" stop-color="#D6EAF5"/>
+      <stop offset="1" stop-color="#CADDE9"/>
+    </linearGradient>
+    <linearGradient id="darkScene" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2B3B4E"/>
+      <stop offset="0.55" stop-color="#202C3A"/>
+      <stop offset="1" stop-color="#18222D"/>
+    </linearGradient>
+    <filter id="panelShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#35516B" flood-opacity="0.14"/>
+    </filter>
+    <filter id="toolbarShadow" x="-20%" y="-30%" width="140%" height="180%">
+      <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#000000" flood-opacity="0.20"/>
+    </filter>
+
+    <symbol id="region" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/>
+      </g>
+    </symbol>
+    <symbol id="window" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+        <rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M4 8.5h16"/>
+        <path stroke-linecap="round" d="M7 6.5h.01M10 6.5h.01"/>
+      </g>
+    </symbol>
+    <symbol id="monitor" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M9 21h6M12 17v4"/>
+      </g>
+    </symbol>
+    <symbol id="all-displays" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2.5" y="4" width="12.5" height="10" rx="2"/><rect x="9" y="8" width="12.5" height="10" rx="2"/>
+        <path d="M5.5 18h6M8.5 14v4M13 21h5M15.5 18v3"/>
+      </g>
+    </symbol>
+    <symbol id="pen" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m4 20 1.2-4.5L16.6 4.1a2 2 0 0 1 2.8 0l.5.5a2 2 0 0 1 0 2.8L8.5 18.8 4 20Z"/>
+        <path d="m14.8 5.9 3.3 3.3M5.2 15.5l3.3 3.3"/>
+      </g>
+    </symbol>
+    <symbol id="rectangle" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+        <rect x="4" y="5" width="16" height="14" rx="2"/>
+        <path fill="currentColor" stroke="none" d="M3 4h3v3H3zM18 4h3v3h-3zM3 17h3v3H3zM18 17h3v3h-3z"/>
+      </g>
+    </symbol>
+    <symbol id="arrow" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 19 19 5M11 5h8v8"/><circle cx="5" cy="19" r="1.5" fill="currentColor" stroke="none"/>
+      </g>
+    </symbol>
+    <symbol id="text" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 7V4h14v3M12 4v16M9 20h6"/>
+      </g>
+    </symbol>
+    <symbol id="undo" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m8 7-4 4 4 4"/><path d="M5 11h8.5a5.5 5.5 0 0 1 5.5 5.5V18"/>
+      </g>
+    </symbol>
+    <symbol id="redo" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m16 7 4 4-4 4"/><path d="M19 11h-8.5A5.5 5.5 0 0 0 5 16.5V18"/>
+      </g>
+    </symbol>
+    <symbol id="color" viewBox="0 0 24 24">
+      <circle cx="8" cy="9" r="4" fill="#28B8DA"/><circle cx="16" cy="9" r="4" fill="#F45D80"/>
+      <circle cx="12" cy="15.5" r="4" fill="#F6C84A"/>
+      <path d="M9.6 12.7a4 4 0 0 1 4.8 0A4 4 0 0 1 12 13.8a4 4 0 0 1-2.4-1.1Z" fill="currentColor" fill-opacity=".88"/>
+    </symbol>
+    <symbol id="line-width" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-linecap="round">
+        <path d="M5 7h14" stroke-width="1.2"/><path d="M5 12h14" stroke-width="2"/><path d="M5 18h14" stroke-width="3"/>
+      </g>
+    </symbol>
+    <symbol id="copy" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+        <rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>
+      </g>
+    </symbol>
+    <symbol id="save" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4v10M8 10l4 4 4-4"/><path d="M5 17v2a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2"/>
+      </g>
+    </symbol>
+    <symbol id="cancel" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="12" cy="12" r="8.5"/><path d="m9 9 6 6M15 9l-6 6"/>
+      </g>
+    </symbol>
+    <symbol id="cursor" viewBox="0 0 24 30">
+      <path d="M3 2.5v21.2l5.4-5.2 3.7 8 4-1.9-3.7-7.7H20L3 2.5Z" fill="#FFFFFF" stroke="#15171A" stroke-width="1.6" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+
+  <rect width="1600" height="820" fill="url(#pageBg)"/>
+  <text x="40" y="48" fill="#18212B" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="28" font-weight="650">截图工具栏 · 透明按钮预览</text>
+  <text x="40" y="78" fill="#647180" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="16">默认态无单独按钮底色；仅悬停按钮出现轻量圆角高亮</text>
+
+  <!-- Light theme panel -->
+  <g transform="translate(40 105)" filter="url(#panelShadow)">
+    <rect width="740" height="660" rx="24" fill="url(#lightScene)"/>
+    <rect x="24" y="22" width="74" height="30" rx="15" fill="#FFFFFF" fill-opacity=".86" stroke="#D5E0E8"/>
+    <circle cx="43" cy="37" r="5" fill="#F6C84A"/>
+    <text x="56" y="42" fill="#29333D" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="14" font-weight="600">亮色</text>
+    <text x="636" y="42" fill="#617180" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="13">Light</text>
+
+    <!-- abstract captured desktop -->
+    <rect x="76" y="86" width="588" height="426" rx="18" fill="#FFFFFF" fill-opacity=".48" stroke="#FFFFFF" stroke-opacity=".72"/>
+    <rect x="98" y="111" width="182" height="376" rx="12" fill="#FFFFFF" fill-opacity=".48"/>
+    <rect x="300" y="111" width="342" height="74" rx="12" fill="#FFFFFF" fill-opacity=".60"/>
+    <rect x="300" y="205" width="161" height="282" rx="12" fill="#FFFFFF" fill-opacity=".42"/>
+    <rect x="481" y="205" width="161" height="282" rx="12" fill="#FFFFFF" fill-opacity=".42"/>
+    <circle cx="128" cy="143" r="10" fill="#6AB7E6"/><rect x="148" y="135" width="86" height="9" rx="4.5" fill="#AABBC8"/>
+    <rect x="119" y="176" width="118" height="8" rx="4" fill="#BCC9D2"/>
+    <rect x="119" y="198" width="96" height="8" rx="4" fill="#C8D3DB"/>
+    <rect x="110" y="98" width="520" height="400" fill="#FFFFFF" fill-opacity=".12" stroke="#2789E8" stroke-width="2"/>
+    <rect x="107" y="95" width="6" height="6" rx="1" fill="#FFFFFF" stroke="#2789E8"/>
+    <rect x="627" y="495" width="6" height="6" rx="1" fill="#FFFFFF" stroke="#2789E8"/>
+
+    <!-- mode toolbar, transparent buttons -->
+    <g transform="translate(267 66)" filter="url(#toolbarShadow)">
+      <rect width="206" height="60" rx="15" fill="#FCFCFC" fill-opacity=".96" stroke="#D9E0E6"/>
+      <g color="#24292F">
+        <use href="#region" x="18" y="18" width="24" height="24"/>
+        <use href="#window" x="66" y="18" width="24" height="24"/>
+        <use href="#monitor" x="114" y="18" width="24" height="24"/>
+        <use href="#all-displays" x="162" y="18" width="24" height="24"/>
+      </g>
+    </g>
+
+    <!-- editing toolbar -->
+    <g transform="translate(100 534)" filter="url(#toolbarShadow)">
+      <rect width="540" height="60" rx="15" fill="#FCFCFC" fill-opacity=".96" stroke="#D9E0E6"/>
+      <rect x="56" y="8" width="44" height="44" rx="9" fill="#000000" fill-opacity=".075"/>
+      <g color="#24292F">
+        <use href="#pen" x="18" y="18" width="24" height="24"/>
+        <use href="#rectangle" x="66" y="18" width="24" height="24"/>
+        <use href="#arrow" x="114" y="18" width="24" height="24"/>
+        <use href="#text" x="162" y="18" width="24" height="24"/>
+        <g opacity=".38"><use href="#undo" x="210" y="18" width="24" height="24"/><use href="#redo" x="258" y="18" width="24" height="24"/></g>
+        <use href="#color" x="306" y="18" width="24" height="24"/>
+        <use href="#line-width" x="354" y="18" width="24" height="24"/>
+        <use href="#save" x="402" y="18" width="24" height="24"/>
+        <use href="#copy" x="450" y="18" width="24" height="24" color="#3BA55D"/>
+        <use href="#cancel" x="498" y="18" width="24" height="24" color="#C42B1C"/>
+      </g>
+      <use href="#cursor" x="86" y="42" width="20" height="25"/>
+    </g>
+    <g transform="translate(156 608)">
+      <rect width="86" height="28" rx="14" fill="#FFFFFF" fill-opacity=".9" stroke="#D5E0E8"/>
+      <circle cx="17" cy="14" r="4" fill="#2789E8"/>
+      <text x="29" y="19" fill="#45515C" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="13">悬停态</text>
+    </g>
+  </g>
+
+  <!-- Dark theme panel -->
+  <g transform="translate(820 105)" filter="url(#panelShadow)">
+    <rect width="740" height="660" rx="24" fill="url(#darkScene)"/>
+    <rect x="24" y="22" width="74" height="30" rx="15" fill="#252B32" fill-opacity=".92" stroke="#48525E"/>
+    <circle cx="43" cy="37" r="5" fill="#83C9F4"/>
+    <text x="56" y="42" fill="#F4F7FA" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="14" font-weight="600">暗色</text>
+    <text x="636" y="42" fill="#AAB7C4" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="13">Dark</text>
+
+    <!-- abstract captured desktop -->
+    <rect x="76" y="86" width="588" height="426" rx="18" fill="#0E141B" fill-opacity=".28" stroke="#91A3B5" stroke-opacity=".18"/>
+    <rect x="98" y="111" width="182" height="376" rx="12" fill="#192532" fill-opacity=".82"/>
+    <rect x="300" y="111" width="342" height="74" rx="12" fill="#273748" fill-opacity=".72"/>
+    <rect x="300" y="205" width="161" height="282" rx="12" fill="#1E2D3B" fill-opacity=".80"/>
+    <rect x="481" y="205" width="161" height="282" rx="12" fill="#1E2D3B" fill-opacity=".80"/>
+    <circle cx="128" cy="143" r="10" fill="#62B5E6"/><rect x="148" y="135" width="86" height="9" rx="4.5" fill="#61768A"/>
+    <rect x="119" y="176" width="118" height="8" rx="4" fill="#4D6274"/>
+    <rect x="119" y="198" width="96" height="8" rx="4" fill="#425769"/>
+    <rect x="110" y="98" width="520" height="400" fill="#FFFFFF" fill-opacity=".015" stroke="#4CACF7" stroke-width="2"/>
+    <rect x="107" y="95" width="6" height="6" rx="1" fill="#202C3A" stroke="#4CACF7"/>
+    <rect x="627" y="495" width="6" height="6" rx="1" fill="#202C3A" stroke="#4CACF7"/>
+
+    <!-- mode toolbar, transparent buttons -->
+    <g transform="translate(267 66)" filter="url(#toolbarShadow)">
+      <rect width="206" height="60" rx="15" fill="#202124" fill-opacity=".97" stroke="#44474D"/>
+      <g color="#F7FAFC">
+        <use href="#region" x="18" y="18" width="24" height="24"/>
+        <use href="#window" x="66" y="18" width="24" height="24"/>
+        <use href="#monitor" x="114" y="18" width="24" height="24"/>
+        <use href="#all-displays" x="162" y="18" width="24" height="24"/>
+      </g>
+    </g>
+
+    <!-- editing toolbar -->
+    <g transform="translate(100 534)" filter="url(#toolbarShadow)">
+      <rect width="540" height="60" rx="15" fill="#202124" fill-opacity=".97" stroke="#44474D"/>
+      <rect x="56" y="8" width="44" height="44" rx="9" fill="#FFFFFF" fill-opacity=".12"/>
+      <g color="#F7FAFC">
+        <use href="#pen" x="18" y="18" width="24" height="24"/>
+        <use href="#rectangle" x="66" y="18" width="24" height="24"/>
+        <use href="#arrow" x="114" y="18" width="24" height="24"/>
+        <use href="#text" x="162" y="18" width="24" height="24"/>
+        <g opacity=".4"><use href="#undo" x="210" y="18" width="24" height="24"/><use href="#redo" x="258" y="18" width="24" height="24"/></g>
+        <use href="#color" x="306" y="18" width="24" height="24"/>
+        <use href="#line-width" x="354" y="18" width="24" height="24"/>
+        <use href="#save" x="402" y="18" width="24" height="24"/>
+        <use href="#copy" x="450" y="18" width="24" height="24" color="#6CCB83"/>
+        <use href="#cancel" x="498" y="18" width="24" height="24" color="#FF8B80"/>
+      </g>
+      <use href="#cursor" x="86" y="42" width="20" height="25"/>
+    </g>
+    <g transform="translate(156 608)">
+      <rect width="86" height="28" rx="14" fill="#252B32" fill-opacity=".94" stroke="#48525E"/>
+      <circle cx="17" cy="14" r="4" fill="#4CACF7"/>
+      <text x="29" y="19" fill="#DDE5EC" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="13">悬停态</text>
+    </g>
+  </g>
+</svg>

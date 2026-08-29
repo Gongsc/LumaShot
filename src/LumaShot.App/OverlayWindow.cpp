@@ -5,6 +5,7 @@
 #include <LumaShot/Localization.h>
 #include <dwmapi.h>
 #include <commctrl.h>
+#include <gdiplus.h>
 #include <shellscalingapi.h>
 #include <uxtheme.h>
 #include <wincodec.h>
@@ -36,6 +37,22 @@ constexpr int ToolWidth = 207;
 constexpr int ActionCopy = 209;
 constexpr int ActionSave = 210;
 constexpr int ActionCancel = 211;
+constexpr COLORREF LightToolbarSurface = RGB(252, 252, 252);
+constexpr COLORREF LightToolbarBorder = RGB(217, 224, 230);
+constexpr COLORREF LightToolbarHover = RGB(233, 233, 233);
+constexpr COLORREF LightToolbarPressed = RGB(220, 222, 225);
+constexpr COLORREF LightToolbarIcon = RGB(36, 41, 47);
+constexpr COLORREF LightToolbarDisabled = RGB(140, 145, 150);
+constexpr COLORREF LightCopyIcon = RGB(59, 165, 93);
+constexpr COLORREF LightCancelIcon = RGB(196, 43, 28);
+constexpr COLORREF DarkToolbarSurface = RGB(32, 33, 36);
+constexpr COLORREF DarkToolbarBorder = RGB(68, 71, 77);
+constexpr COLORREF DarkToolbarHover = RGB(59, 60, 62);
+constexpr COLORREF DarkToolbarPressed = RGB(72, 73, 76);
+constexpr COLORREF DarkToolbarIcon = RGB(247, 250, 252);
+constexpr COLORREF DarkToolbarDisabled = RGB(125, 125, 130);
+constexpr COLORREF DarkCopyIcon = RGB(108, 203, 131);
+constexpr COLORREF DarkCancelIcon = RGB(255, 139, 128);
 constexpr int MagnifierSampleSize = 17;
 constexpr int MagnifierZoom = 8;
 constexpr int MagnifierPadding = 5;
@@ -52,7 +69,7 @@ constexpr std::array ButtonDefinitions{
     std::pair{ToolArrow, StringId::Arrow}, std::pair{ToolText, StringId::Text},
     std::pair{ToolUndo, StringId::Undo}, std::pair{ToolRedo, StringId::Redo},
     std::pair{ToolColor, StringId::Color}, std::pair{ToolWidth, StringId::LineWidth},
-    std::pair{ActionCopy, StringId::Copy}, std::pair{ActionSave, StringId::Save},
+    std::pair{ActionSave, StringId::Save}, std::pair{ActionCopy, StringId::Copy},
     std::pair{ActionCancel, StringId::Cancel}};
 
 POINT PointFromLParam(LPARAM value) { return POINT{GET_X_LPARAM(value), GET_Y_LPARAM(value)}; }
@@ -62,6 +79,17 @@ bool IsHighContrastEnabled() noexcept {
     HIGHCONTRASTW value{sizeof(value)};
     return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0) &&
            (value.dwFlags & HCF_HIGHCONTRASTON) != 0;
+}
+
+bool IsSystemDarkMode() noexcept {
+    DWORD value = 1;
+    DWORD size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS) {
+        return false;
+    }
+    return value == 0;
 }
 
 UINT DpiForMonitor(HMONITOR monitor) noexcept {
@@ -319,34 +347,64 @@ int ToolbarIconIndex(int id) noexcept {
 
 class ToolbarIconAtlas final {
 public:
-    ToolbarIconAtlas() noexcept { load(); }
+    ToolbarIconAtlas() noexcept {
+        Gdiplus::GdiplusStartupInput startupInput;
+        if (Gdiplus::GdiplusStartup(&gdiplusToken_, &startupInput, nullptr) == Gdiplus::Ok) load();
+    }
     ~ToolbarIconAtlas() {
-        if (memoryDc_) {
-            if (previousBitmap_) SelectObject(memoryDc_, previousBitmap_);
-            DeleteDC(memoryDc_);
-        }
+        if (tintedBitmap_) DeleteObject(tintedBitmap_);
         if (bitmap_) DeleteObject(bitmap_);
+        if (gdiplusToken_) Gdiplus::GdiplusShutdown(gdiplusToken_);
     }
     ToolbarIconAtlas(const ToolbarIconAtlas&) = delete;
     ToolbarIconAtlas& operator=(const ToolbarIconAtlas&) = delete;
 
-    [[nodiscard]] bool draw(HDC target, int index, const RECT& bounds, BYTE opacity,
-                            int destinationSize) const noexcept {
-        constexpr int sourceSize = 24;
+    [[nodiscard]] bool draw(HDC target, int index, const RECT& bounds, COLORREF tint,
+                            BYTE opacity, bool preserveSourceColor, int destinationSize) const noexcept {
+        constexpr int sourceSize = 96;
         constexpr int iconCount = 15;
-        if (!memoryDc_ || index < 0 || index >= iconCount) return false;
+        constexpr int sourceWidth = sourceSize * iconCount;
+        if (!gdiplusToken_ || !pixels_ || !tintedPixels_ || index < 0 || index >= iconCount) return false;
+        const BYTE tintBlue = GetBValue(tint);
+        const BYTE tintGreen = GetGValue(tint);
+        const BYTE tintRed = GetRValue(tint);
+        for (int y = 0; y < sourceSize; ++y) {
+            for (int x = 0; x < sourceSize; ++x) {
+                const BYTE* source = pixels_ + (y * sourceWidth + index * sourceSize + x) * 4;
+                BYTE* destination = tintedPixels_ + (y * sourceSize + x) * 4;
+                const BYTE alpha = static_cast<BYTE>((static_cast<unsigned int>(source[3]) * opacity + 127u) / 255u);
+                if (preserveSourceColor) {
+                    destination[0] = static_cast<BYTE>((static_cast<unsigned int>(source[0]) * opacity + 127u) / 255u);
+                    destination[1] = static_cast<BYTE>((static_cast<unsigned int>(source[1]) * opacity + 127u) / 255u);
+                    destination[2] = static_cast<BYTE>((static_cast<unsigned int>(source[2]) * opacity + 127u) / 255u);
+                } else {
+                    destination[0] = static_cast<BYTE>((static_cast<unsigned int>(tintBlue) * alpha + 127u) / 255u);
+                    destination[1] = static_cast<BYTE>((static_cast<unsigned int>(tintGreen) * alpha + 127u) / 255u);
+                    destination[2] = static_cast<BYTE>((static_cast<unsigned int>(tintRed) * alpha + 127u) / 255u);
+                }
+                destination[3] = alpha;
+            }
+        }
         destinationSize = std::max(1, destinationSize);
         const int x = (bounds.left + bounds.right - destinationSize) / 2;
         const int y = (bounds.top + bounds.bottom - destinationSize) / 2;
-        BLENDFUNCTION blend{AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
-        return AlphaBlend(target, x, y, destinationSize, destinationSize,
-                          memoryDc_, index * sourceSize, 0, sourceSize, sourceSize, blend) != FALSE;
+        Gdiplus::Bitmap source(sourceSize, sourceSize, sourceSize * 4,
+                               PixelFormat32bppPARGB, tintedPixels_);
+        Gdiplus::Graphics graphics(target);
+        graphics.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+        graphics.SetCompositingQuality(Gdiplus::CompositingQualityHighQuality);
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+        return graphics.DrawImage(&source, Gdiplus::Rect(x, y, destinationSize, destinationSize),
+                                  0, 0, sourceSize, sourceSize, Gdiplus::UnitPixel) == Gdiplus::Ok;
     }
 
 private:
-    HDC memoryDc_{};
+    ULONG_PTR gdiplusToken_{};
     HBITMAP bitmap_{};
-    HGDIOBJ previousBitmap_{};
+    BYTE* pixels_{};
+    HBITMAP tintedBitmap_{};
+    BYTE* tintedPixels_{};
 
     void load() noexcept {
         const HMODULE module = GetModuleHandleW(nullptr);
@@ -374,7 +432,10 @@ private:
                                          WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) return;
 
         UINT width{}, height{};
-        if (FAILED(converter->GetSize(&width, &height)) || width != 360 || height != 24) return;
+        constexpr UINT sourceSize = 96;
+        constexpr UINT iconCount = 15;
+        if (FAILED(converter->GetSize(&width, &height)) ||
+            width != sourceSize * iconCount || height != sourceSize) return;
         BITMAPINFO info{};
         info.bmiHeader.biSize = sizeof(info.bmiHeader);
         info.bmiHeader.biWidth = static_cast<LONG>(width);
@@ -391,22 +452,35 @@ private:
             if (bitmap_) { DeleteObject(bitmap_); bitmap_ = nullptr; }
             return;
         }
-        memoryDc_ = CreateCompatibleDC(nullptr);
-        if (!memoryDc_) { DeleteObject(bitmap_); bitmap_ = nullptr; return; }
-        previousBitmap_ = SelectObject(memoryDc_, bitmap_);
+        pixels_ = static_cast<BYTE*>(pixels);
+
+        BITMAPINFO tintedInfo{};
+        tintedInfo.bmiHeader.biSize = sizeof(tintedInfo.bmiHeader);
+        tintedInfo.bmiHeader.biWidth = sourceSize;
+        tintedInfo.bmiHeader.biHeight = -static_cast<LONG>(sourceSize);
+        tintedInfo.bmiHeader.biPlanes = 1;
+        tintedInfo.bmiHeader.biBitCount = 32;
+        tintedInfo.bmiHeader.biCompression = BI_RGB;
+        void* tintedPixels{};
+        screen = GetDC(nullptr);
+        tintedBitmap_ = CreateDIBSection(screen, &tintedInfo, DIB_RGB_COLORS, &tintedPixels, nullptr, 0);
+        ReleaseDC(nullptr, screen);
+        if (!tintedBitmap_ || !tintedPixels) return;
+        tintedPixels_ = static_cast<BYTE*>(tintedPixels);
     }
 };
 
 void DrawButtonIcon(HDC dc, int id, const RECT& bounds, COLORREF color,
-                    ColorRgba annotationColor, int annotationWidth, UINT dpi,
-                    bool highContrast) {
+                     ColorRgba annotationColor, int annotationWidth, UINT dpi,
+                     bool highContrast, bool disabled) {
     if (highContrast) {
         DrawLegacyButtonIcon(dc, id, bounds, color, annotationColor, annotationWidth);
         return;
     }
     static const ToolbarIconAtlas atlas;
-    const BYTE opacity = GetRValue(color) < 200 ? 115 : 255;
-    if (!atlas.draw(dc, ToolbarIconIndex(id), bounds, opacity, MulDiv(24, static_cast<int>(dpi), 96))) {
+    const BYTE opacity = disabled ? 110 : 255;
+    if (!atlas.draw(dc, ToolbarIconIndex(id), bounds, color, opacity, id == ToolColor,
+                    MulDiv(24, static_cast<int>(dpi), 96))) {
         DrawLegacyButtonIcon(dc, id, bounds, color, annotationColor, annotationWidth);
         return;
     }
@@ -436,6 +510,12 @@ void FillRoundRect(HDC dc, const RECT& rect, int radius, COLORREF fill, COLORREF
     SelectObject(dc, oldBrush);
     DeleteObject(pen);
     DeleteObject(brush);
+}
+
+void RedrawButtonNow(HWND control) {
+    if (control) {
+        RedrawWindow(control, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+    }
 }
 
 } // namespace
@@ -540,27 +620,44 @@ LRESULT CALLBACK OverlayWindow::EditProc(HWND window, UINT message, WPARAM wpara
 LRESULT CALLBACK OverlayWindow::ButtonProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
                                            UINT_PTR id, DWORD_PTR data) {
     auto* self = reinterpret_cast<OverlayWindow*>(data);
+    const int buttonId = static_cast<int>(id);
     switch (message) {
     case WM_MOUSEMOVE: {
-        if (self->hoveredButton_ != static_cast<int>(id)) {
-            if (HWND previous = GetDlgItem(self->hwnd_, self->hoveredButton_))
-                InvalidateRect(previous, nullptr, FALSE);
-            self->hoveredButton_ = static_cast<int>(id);
-            InvalidateRect(window, nullptr, FALSE);
+        if (self->hoveredButton_ != buttonId) {
+            const int previousId = self->hoveredButton_;
+            self->hoveredButton_ = buttonId;
+            if (previousId >= 0) RedrawButtonNow(GetDlgItem(self->hwnd_, previousId));
+            RedrawButtonNow(window);
         }
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
         TrackMouseEvent(&tracking);
         break;
     }
     case WM_MOUSELEAVE:
-        if (self->hoveredButton_ == static_cast<int>(id)) {
+        if (self->hoveredButton_ == buttonId) {
             self->hoveredButton_ = -1;
-            InvalidateRect(window, nullptr, FALSE);
+            RedrawButtonNow(window);
+        }
+        break;
+    case WM_LBUTTONDOWN: {
+        const int previousId = self->pressedButton_;
+        self->pressedButton_ = buttonId;
+        if (previousId >= 0 && previousId != buttonId)
+            RedrawButtonNow(GetDlgItem(self->hwnd_, previousId));
+        RedrawButtonNow(window);
+        break;
+    }
+    case WM_LBUTTONUP:
+    case WM_CAPTURECHANGED:
+    case WM_CANCELMODE:
+        if (self->pressedButton_ == buttonId) {
+            self->pressedButton_ = -1;
+            RedrawButtonNow(window);
         }
         break;
     case WM_SETFOCUS:
     case WM_KILLFOCUS:
-        InvalidateRect(window, nullptr, FALSE);
+        RedrawButtonNow(window);
         break;
     case WM_NCDESTROY:
         RemoveWindowSubclass(window, ButtonProc, id);
@@ -608,7 +705,10 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         mouseInside_ = true;
         const int hovered = buttonAt(client);
         if (hovered != hoveredButton_) {
+            const int previousId = hoveredButton_;
             hoveredButton_ = hovered;
+            if (previousId >= 0) RedrawButtonNow(GetDlgItem(hwnd_, previousId));
+            if (hovered >= 0) RedrawButtonNow(GetDlgItem(hwnd_, hovered));
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
         if (previousMagnifierVisible || magnifierVisible()) {
@@ -657,7 +757,9 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         }
         mouseInside_ = false;
         if (hoveredButton_ >= 0) {
+            const int previousId = hoveredButton_;
             hoveredButton_ = -1;
+            RedrawButtonNow(GetDlgItem(hwnd_, previousId));
             InvalidateRect(hwnd_, nullptr, FALSE);
         } else if (previousMagnifierVisible) {
             InvalidateRect(hwnd_, &previousMagnifier, FALSE);
@@ -843,38 +945,41 @@ void OverlayWindow::rebuildButtons() {
 
 void OverlayWindow::drawButton(const DRAWITEMSTRUCT& item) {
     const int id = static_cast<int>(item.CtlID);
-    const bool active = (id == ModeRegion && mode_ == CaptureMode::Region) ||
-                        (id == ModeWindow && mode_ == CaptureMode::Window) ||
-                        (id == ModeMonitor && mode_ == CaptureMode::Monitor) ||
-                        (id == ModeAll && mode_ == CaptureMode::VirtualDesktop) ||
-                        (id == ToolPen && tool_ == AnnotationTool::Pen) ||
-                        (id == ToolRectangle && tool_ == AnnotationTool::Rectangle) ||
-                        (id == ToolArrow && tool_ == AnnotationTool::Arrow) ||
-                        (id == ToolText && tool_ == AnnotationTool::Text);
-    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
-    const bool focused = (item.itemState & ODS_FOCUS) != 0;
-    const bool hovered = hoveredButton_ == id || (item.itemState & ODS_HOTLIGHT) != 0;
+    const bool pressed = pressedButton_ == id;
+    const bool focused = GetFocus() == item.hwndItem;
+    const bool hovered = hoveredButton_ == id;
     const bool disabled = (item.itemState & ODS_DISABLED) != 0;
     const bool highContrast = IsHighContrastEnabled();
+    const bool dark = !highContrast && IsSystemDarkMode();
+    COLORREF surface{};
     COLORREF background{};
     COLORREF outline{};
     COLORREF icon{};
     if (highContrast) {
-        const bool highlighted = active || pressed || hovered;
+        const bool highlighted = pressed || hovered;
+        surface = GetSysColor(COLOR_WINDOW);
         background = GetSysColor(highlighted ? COLOR_HIGHLIGHT : COLOR_WINDOW);
-        outline = GetSysColor(COLOR_WINDOWTEXT);
+        outline = background;
         icon = GetSysColor(disabled ? COLOR_GRAYTEXT : highlighted ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
     } else {
-        background = pressed ? RGB(0, 82, 148) : active ? RGB(0, 120, 212)
-                   : hovered ? RGB(62, 62, 66) : RGB(42, 42, 45);
-        outline = active ? RGB(72, 169, 244) : hovered ? RGB(92, 92, 97) : RGB(42, 42, 45);
-        icon = disabled ? RGB(125, 125, 130) : RGB(250, 250, 250);
+        surface = dark ? DarkToolbarSurface : LightToolbarSurface;
+        background = pressed ? (dark ? DarkToolbarPressed : LightToolbarPressed)
+                   : hovered ? (dark ? DarkToolbarHover : LightToolbarHover)
+                             : surface;
+        outline = background;
+        if (disabled) icon = dark ? DarkToolbarDisabled : LightToolbarDisabled;
+        else if (id == ActionCopy) icon = dark ? DarkCopyIcon : LightCopyIcon;
+        else if (id == ActionCancel) icon = dark ? DarkCancelIcon : LightCancelIcon;
+        else icon = dark ? DarkToolbarIcon : LightToolbarIcon;
     }
     RECT rect = item.rcItem;
-    FillRoundRect(item.hDC, rect, scale(9), background, outline);
+    HBRUSH surfaceBrush = CreateSolidBrush(surface);
+    FillRect(item.hDC, &rect, surfaceBrush);
+    DeleteObject(surfaceBrush);
+    if (pressed || hovered) FillRoundRect(item.hDC, rect, scale(9), background, outline);
     if (pressed) OffsetRect(&rect, 0, scale(1));
     DrawButtonIcon(item.hDC, id, rect, icon, AnnotationColors[colorIndex_],
-                   static_cast<int>(AnnotationWidths[lineWidthIndex_]), uiDpi_, highContrast);
+                   static_cast<int>(AnnotationWidths[lineWidthIndex_]), uiDpi_, highContrast, disabled);
     if (focused) {
         RECT focus = item.rcItem;
         InflateRect(&focus, -scale(4), -scale(4));
@@ -1314,11 +1419,14 @@ void OverlayWindow::paint() {
 
     const auto drawGroupSurface = [&](const std::vector<Button>& buttons) {
         if (buttons.empty()) return;
+        const bool dark = !highContrast && IsSystemDarkMode();
         RECT surface{buttons.front().rect.left - scale(6), buttons.front().rect.top - scale(6),
                      buttons.back().rect.right + scale(6), buttons.back().rect.bottom + scale(6)};
         FillRoundRect(dc, surface, scale(13),
-                      highContrast ? GetSysColor(COLOR_WINDOW) : RGB(31, 31, 34),
-                      highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(75, 75, 79));
+                      highContrast ? GetSysColor(COLOR_WINDOW)
+                                   : dark ? DarkToolbarSurface : LightToolbarSurface,
+                      highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                   : dark ? DarkToolbarBorder : LightToolbarBorder);
     };
     drawGroupSurface(modeButtons_);
     drawGroupSurface(toolButtons_);
