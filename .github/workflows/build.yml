@@ -1,4 +1,4 @@
-name: Build
+name: Build and Release
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -24,6 +24,8 @@ jobs:
       PLATFORM: x64
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
+      NATIVE_ARCHIVE: artifacts/LumaShot-native-x64-${{ github.ref_name }}.zip
+      CONTROL_CENTER_ARCHIVE: artifacts/LumaShot-control-center-x64-${{ github.ref_name }}.zip
 
     steps:
       - name: Check out repository
@@ -60,25 +62,61 @@ jobs:
         shell: pwsh
         run: ./bin/Release/LumaShot.Tests.exe
 
+      - name: Package release archives
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nativeStage = Join-Path $env:RUNNER_TEMP 'LumaShot-native-x64'
+          $controlCenterStage = Join-Path $env:RUNNER_TEMP 'LumaShot-control-center-x64'
+          $controlCenterOutput = 'src/LumaShot.ControlCenter/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64'
+
+          New-Item -ItemType Directory -Force -Path $nativeStage, $controlCenterStage, 'artifacts' | Out-Null
+
+          Copy-Item -LiteralPath 'bin/Release/LumaShot.exe' -Destination $nativeStage
+          Copy-Item -LiteralPath 'LICENSE', 'README.md', 'README.zh-CN.md' -Destination $nativeStage
+          Copy-Item -LiteralPath 'docs' -Destination $nativeStage -Recurse
+
+          Copy-Item -Path "$controlCenterOutput/*" -Destination $controlCenterStage -Recurse
+          Copy-Item -LiteralPath 'LICENSE' -Destination $controlCenterStage
+
+          Compress-Archive -Path "$nativeStage/*" -DestinationPath $env:NATIVE_ARCHIVE -Force
+          Compress-Archive -Path "$controlCenterStage/*" -DestinationPath $env:CONTROL_CENTER_ARCHIVE -Force
+
       - name: Upload native application
         uses: actions/upload-artifact@v4
         with:
-          name: LumaShot-native-x64
-          path: |
-            bin/Release/LumaShot.exe
-            LICENSE
-            README.md
-            README.zh-CN.md
-            docs/**
+          name: LumaShot-native-x64-${{ github.ref_name }}
+          path: ${{ env.NATIVE_ARCHIVE }}
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload WinUI 3 control center
         uses: actions/upload-artifact@v4
         with:
-          name: LumaShot-control-center-x64
-          path: |
-            src/LumaShot.ControlCenter/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64/**
-            LICENSE
+          name: LumaShot-control-center-x64-${{ github.ref_name }}
+          path: ${{ env.CONTROL_CENTER_ARCHIVE }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: true
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $repository = $env:GITHUB_REPOSITORY
+          $assets = @($env:NATIVE_ARCHIVE, $env:CONTROL_CENTER_ARCHIVE)
+
+          & gh release view $tag --repo $repository *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+
+          if ($releaseExists) {
+            & gh release upload $tag @assets --clobber --repo $repository
+          }
+          else {
+            & gh release create $tag @assets --verify-tag --generate-notes --title $tag --repo $repository
+          }
+
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
