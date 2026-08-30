@@ -6,6 +6,7 @@
 #include <dwmapi.h>
 #include <commctrl.h>
 #include <gdiplus.h>
+#include <imm.h>
 #include <shellscalingapi.h>
 #include <uxtheme.h>
 #include <wincodec.h>
@@ -37,6 +38,7 @@ constexpr int ToolWidth = 207;
 constexpr int ActionCopy = 209;
 constexpr int ActionSave = 210;
 constexpr int ActionCancel = 211;
+constexpr int TextEditorId = 300;
 constexpr COLORREF LightToolbarSurface = RGB(252, 252, 252);
 constexpr COLORREF LightToolbarBorder = RGB(217, 224, 230);
 constexpr COLORREF LightToolbarHover = RGB(233, 233, 233);
@@ -518,6 +520,14 @@ void RedrawButtonNow(HWND control) {
     }
 }
 
+bool HasImeComposition(HWND editor) noexcept {
+    HIMC context = ImmGetContext(editor);
+    if (!context) return false;
+    const LONG compositionBytes = ImmGetCompositionStringW(context, GCS_COMPSTR, nullptr, 0);
+    ImmReleaseContext(editor, context);
+    return compositionBytes > 0;
+}
+
 } // namespace
 
 OverlayWindow::OverlayWindow(HINSTANCE instance, CaptureFrameSet frames, CaptureMode mode, Language language,
@@ -559,7 +569,10 @@ bool OverlayWindow::run(const CommitHandler& commit) {
                 handledShortcut = true;
             }
         }
-        if (!handledShortcut && !IsDialogMessageW(hwnd_, &message)) {
+        const bool editorCommitKey = textEditor_ && message.hwnd == textEditor_ &&
+                                     message.message == WM_KEYDOWN &&
+                                     (message.wParam == VK_RETURN || message.wParam == VK_ESCAPE);
+        if (!handledShortcut && (editorCommitKey || !IsDialogMessageW(hwnd_, &message))) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -610,10 +623,15 @@ LRESULT CALLBACK OverlayWindow::WindowProc(HWND window, UINT message, WPARAM wpa
 }
 
 LRESULT CALLBACK OverlayWindow::EditProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR data) {
+    if (message == WM_GETDLGCODE && (wparam == VK_RETURN || wparam == VK_ESCAPE)) {
+        return DLGC_WANTALLKEYS;
+    }
     if (message == WM_KEYDOWN && (wparam == VK_RETURN || wparam == VK_ESCAPE)) {
+        if (wparam == VK_RETURN && HasImeComposition(window)) return DefSubclassProc(window, message, wparam, lparam);
         PostMessageW(reinterpret_cast<HWND>(data), CommitTextMessage, wparam == VK_ESCAPE, 0);
         return 0;
     }
+    if (message == WM_CHAR && (wparam == VK_RETURN || wparam == VK_ESCAPE)) return 0;
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
@@ -670,6 +688,21 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     switch (message) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: paint(); return 0;
+    case WM_CTLCOLOREDIT:
+        if (reinterpret_cast<HWND>(lparam) == textEditor_) {
+            HDC editDc = reinterpret_cast<HDC>(wparam);
+            const bool highContrast = IsHighContrastEnabled();
+            const bool dark = !highContrast && IsSystemDarkMode();
+            const COLORREF background = highContrast ? GetSysColor(COLOR_WINDOW)
+                                                      : dark ? RGB(39, 40, 44) : RGB(252, 252, 252);
+            SetBkMode(editDc, OPAQUE);
+            SetBkColor(editDc, background);
+            SetTextColor(editDc, highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                              : dark ? RGB(247, 250, 252) : RGB(32, 33, 36));
+            if (!textEditorBrush_) textEditorBrush_ = CreateSolidBrush(background);
+            return reinterpret_cast<LRESULT>(textEditorBrush_);
+        }
+        break;
     case WM_DRAWITEM:
         if (wparam >= ModeRegion && wparam <= ActionCancel) {
             drawButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
@@ -688,6 +721,10 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
     case WM_SYSCOLORCHANGE:
+        if (textEditorBrush_) {
+            DeleteObject(textEditorBrush_);
+            textEditorBrush_ = nullptr;
+        }
         RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
         return 0;
     case WM_SETCURSOR: {
@@ -837,6 +874,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         releaseBackBuffer();
         if (textEditorFont_) DeleteObject(textEditorFont_);
         textEditorFont_ = nullptr;
+        if (textEditorBrush_) DeleteObject(textEditorBrush_);
+        textEditorBrush_ = nullptr;
         tooltip_ = nullptr;
         hwnd_ = nullptr;
         return 0;
@@ -1193,35 +1232,86 @@ void OverlayWindow::finishDrawing() {
 
 void OverlayWindow::beginText(POINT point) {
     if (textEditor_) return;
-    textOrigin_ = relativePoint(point);
-    POINT client = clientFromDesktop(point);
-    textEditor_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
-                                  client.x, client.y, scale(280), scale(34),
-                                  hwnd_, nullptr, instance_, nullptr);
+    POINT clientPoint = clientFromDesktop(point);
+    RECT clientBounds{};
+    GetClientRect(hwnd_, &clientBounds);
+    POINT selectionTopLeft = clientFromDesktop({selection_.left, selection_.top});
+    POINT selectionBottomRight = clientFromDesktop({selection_.right, selection_.bottom});
+    RECT placementBounds{selectionTopLeft.x, selectionTopLeft.y,
+                         selectionBottomRight.x, selectionBottomRight.y};
+    const int placementMargin = scale(6);
+    const int frameWidth = scale(340);
+    const int frameHeight = scale(62);
+    if (placementBounds.right - placementBounds.left < frameWidth + placementMargin * 2 ||
+        placementBounds.bottom - placementBounds.top < frameHeight + placementMargin * 2) {
+        placementBounds = clientBounds;
+    }
+    const int minimumLeft = placementBounds.left + placementMargin;
+    const int minimumTop = placementBounds.top + placementMargin;
+    const int maximumLeft = std::max(minimumLeft, static_cast<int>(placementBounds.right) - placementMargin - frameWidth);
+    const int maximumTop = std::max(minimumTop, static_cast<int>(placementBounds.bottom) - placementMargin - frameHeight);
+    const int frameLeft = std::clamp(static_cast<int>(clientPoint.x) - scale(12), minimumLeft, maximumLeft);
+    const int frameTop = std::clamp(static_cast<int>(clientPoint.y) - scale(10), minimumTop, maximumTop);
+    textEditorFrame_ = {frameLeft, frameTop, frameLeft + frameWidth, frameTop + frameHeight};
+
+    const int editorInset = scale(2);
+    const int editorHeight = scale(40);
+    const int editorLeft = textEditorFrame_.left + editorInset;
+    const int editorTop = textEditorFrame_.top + editorInset;
+    const int editorWidth = frameWidth - editorInset * 2;
+    const POINT originClient{editorLeft + scale(12), editorTop + scale(9)};
+    textOrigin_ = relativePoint(desktopFromClient(originClient));
+
+    if (textEditorBrush_) DeleteObject(textEditorBrush_);
+    textEditorBrush_ = nullptr;
+    textEditor_ = CreateWindowExW(0, L"EDIT", L"",
+                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NOHIDESEL,
+                                  editorLeft, editorTop, editorWidth, editorHeight,
+                                  hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(TextEditorId)),
+                                  instance_, nullptr);
     if (textEditor_) {
         if (textEditorFont_) DeleteObject(textEditorFont_);
-        textEditorFont_ = CreateFontW(-scale(16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        textEditorFont_ = CreateFontW(-scale(18), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                       CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
                                       L"Segoe UI Variable Text");
+        SetWindowTheme(textEditor_, L"", nullptr);
         SendMessageW(textEditor_, WM_SETFONT, reinterpret_cast<WPARAM>(textEditorFont_), TRUE);
+        SendMessageW(textEditor_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                     MAKELPARAM(scale(10), scale(10)));
+        const auto placeholder = Localized(StringId::TextInputPlaceholder, language_);
+        SendMessageW(textEditor_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(placeholder.data()));
+        if (HRGN editorRegion = CreateRoundRectRgn(0, 0, editorWidth + 1, editorHeight + 1,
+                                                   scale(10), scale(10));
+            editorRegion && !SetWindowRgn(textEditor_, editorRegion, TRUE)) {
+            DeleteObject(editorRegion);
+        }
         SetWindowSubclass(textEditor_, EditProc, 1, reinterpret_cast<DWORD_PTR>(hwnd_));
+        InvalidateRect(hwnd_, &textEditorFrame_, FALSE);
+        UpdateWindow(hwnd_);
         SetFocus(textEditor_);
     }
 }
 
 void OverlayWindow::commitText(bool cancel) {
     if (!textEditor_) return;
+    const RECT previousFrame = textEditorFrame_;
     if (!cancel) {
         const int length = GetWindowTextLengthW(textEditor_);
         std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
         GetWindowTextW(textEditor_, text.data(), length + 1); text.resize(length);
-        if (!text.empty()) annotations_.add(TextAnnotation{textOrigin_, std::move(text), AnnotationColors[colorIndex_], 20.0f});
+        if (!text.empty()) {
+            annotations_.add(TextAnnotation{textOrigin_, std::move(text), AnnotationColors[colorIndex_],
+                                            static_cast<float>(scale(20))});
+        }
     }
     RemoveWindowSubclass(textEditor_, EditProc, 1); DestroyWindow(textEditor_); textEditor_ = nullptr;
     if (textEditorFont_) DeleteObject(textEditorFont_);
     textEditorFont_ = nullptr;
+    if (textEditorBrush_) DeleteObject(textEditorBrush_);
+    textEditorBrush_ = nullptr;
+    textEditorFrame_ = {};
+    InvalidateRect(hwnd_, &previousFrame, FALSE);
     SetFocus(hwnd_); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -1442,7 +1532,19 @@ void OverlayWindow::paint() {
                 } else if constexpr (std::is_same_v<T, ArrowAnnotation>) {
                     DrawArrowGdi(dc, {x + item.start.x, y + item.start.y}, {x + item.end.x, y + item.end.y}, pen);
                 } else if constexpr (std::is_same_v<T, TextAnnotation>) {
-                    SetBkMode(dc, TRANSPARENT); SetTextColor(dc, ToColor(item.color)); RECT textRect{x + static_cast<int>(item.origin.x), y + static_cast<int>(item.origin.y), x + selection_.width(), y + selection_.height()}; DrawTextW(dc, item.text.c_str(), -1, &textRect, DT_LEFT | DT_TOP | DT_NOPREFIX);
+                    SetBkMode(dc, TRANSPARENT);
+                    SetTextColor(dc, ToColor(item.color));
+                    HFONT textFont = CreateFontW(-std::max(1, static_cast<int>(std::lround(item.fontSize))),
+                                                 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                                 CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                                 L"Segoe UI Variable Text");
+                    const auto previousFont = SelectObject(dc, textFont);
+                    RECT textRect{x + static_cast<int>(item.origin.x), y + static_cast<int>(item.origin.y),
+                                  x + selection_.width(), y + selection_.height()};
+                    DrawTextW(dc, item.text.c_str(), -1, &textRect, DT_LEFT | DT_TOP | DT_NOPREFIX);
+                    SelectObject(dc, previousFont);
+                    DeleteObject(textFont);
                 }
                 SelectObject(dc, old); DeleteObject(pen);
             }, annotation);
@@ -1466,6 +1568,30 @@ void OverlayWindow::paint() {
     };
     drawGroupSurface(modeButtons_);
     drawGroupSurface(toolButtons_);
+    if (textEditor_ && !IsRectEmpty(&textEditorFrame_)) {
+        const bool dark = !highContrast && IsSystemDarkMode();
+        const COLORREF editorBackground = highContrast ? GetSysColor(COLOR_WINDOW)
+                                                       : dark ? RGB(39, 40, 44) : RGB(252, 252, 252);
+        const COLORREF editorBorder = highContrast ? GetSysColor(COLOR_HIGHLIGHT)
+                                                   : dark ? RGB(92, 170, 255) : RGB(0, 95, 184);
+        FillRoundRect(dc, textEditorFrame_, scale(12), editorBackground, editorBorder);
+
+        HFONT hintFont = CreateFontW(-scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                     L"Segoe UI Variable Text");
+        const auto previousFont = SelectObject(dc, hintFont);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                     : dark ? RGB(184, 186, 191) : RGB(96, 99, 104));
+        RECT hintRect{textEditorFrame_.left + scale(12), textEditorFrame_.top + scale(41),
+                      textEditorFrame_.right - scale(12), textEditorFrame_.bottom - scale(3)};
+        const auto hint = Localized(StringId::TextInputHint, language_);
+        DrawTextW(dc, hint.data(), static_cast<int>(hint.size()), &hintRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, previousFont);
+        DeleteObject(hintFont);
+    }
     if (buffered) {
         if (savedBufferState != 0) RestoreDC(dc, savedBufferState);
         BitBlt(windowDc, ps.rcPaint.left, ps.rcPaint.top,

@@ -28,6 +28,8 @@ private:
     HWND textEditor_{};
     HWND tooltip_{};
     HFONT textEditorFont_{};
+    HBRUSH textEditorBrush_{};
+    RECT textEditorFrame_{};
     CaptureFrameSet frames_;
     ImageF16 previewSource_;
     ImageBgra8 preview_;
