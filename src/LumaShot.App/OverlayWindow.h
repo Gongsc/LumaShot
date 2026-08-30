@@ -28,11 +28,15 @@ private:
     HWND textEditor_{};
     HWND textFontCombo_{};
     HWND textSizeCombo_{};
+    HWND hoveredTextCombo_{};
+    HWND pressedTextCombo_{};
     HWND tooltip_{};
     HFONT textEditorFont_{};
     HFONT textControlsFont_{};
     HBRUSH textEditorBrush_{};
+    HBRUSH textComboBrush_{};
     RECT textEditorFrame_{};
+    RECT textInputFrame_{};
     CaptureFrameSet frames_;
     ImageF16 previewSource_;
     ImageBgra8 preview_;
@@ -81,11 +85,16 @@ private:
 
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
     static LRESULT CALLBACK EditProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR data);
+    static LRESULT CALLBACK ComboProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+                                      UINT_PTR id, DWORD_PTR data);
     static LRESULT CALLBACK ButtonProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
                                        UINT_PTR id, DWORD_PTR data);
     LRESULT handleMessage(UINT message, WPARAM wparam, LPARAM lparam);
     void createControls();
     void drawButton(const DRAWITEMSTRUCT& item);
+    void drawTextComboItem(const DRAWITEMSTRUCT& item);
+    void drawTextCombo(HWND combo, HDC dc) const;
+    void applyTextComboTheme(HWND combo) const;
     void paint();
     [[nodiscard]] bool ensureBackBuffer(HDC reference, int width, int height);
     void releaseBackBuffer() noexcept;

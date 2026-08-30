@@ -84,7 +84,8 @@ void AnnotationTests() {
     Check(document.undo() && document.items().size() == 3 && document.canRedo(), "undoes annotation");
     Check(document.redo() && document.items().size() == 4, "redoes annotation");
     Check(!Localized(StringId::Capture, Language::SimplifiedChinese).empty() && Localized(StringId::Capture, Language::English) == L"Capture", "loads Chinese and English resources");
-    Check(Localized(StringId::Font, Language::SimplifiedChinese) == L"字体" &&
+    Check(Localized(StringId::AddText, Language::English) == L"Add text" &&
+          Localized(StringId::Font, Language::SimplifiedChinese) == L"字体" &&
           Localized(StringId::FontSize, Language::English) == L"Size",
           "loads text formatting resources");
     Check(Localized(StringId::SettingsSubtitle, Language::English) == L"Personalize your capture experience" &&

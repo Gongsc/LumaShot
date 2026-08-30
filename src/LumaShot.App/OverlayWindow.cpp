@@ -57,6 +57,25 @@ constexpr COLORREF DarkToolbarIcon = RGB(247, 250, 252);
 constexpr COLORREF DarkToolbarDisabled = RGB(125, 125, 130);
 constexpr COLORREF DarkCopyIcon = RGB(108, 203, 131);
 constexpr COLORREF DarkCancelIcon = RGB(255, 139, 128);
+constexpr COLORREF LightTextCardSurface = RGB(250, 250, 250);
+constexpr COLORREF LightTextCardBorder = RGB(218, 218, 218);
+constexpr COLORREF LightTextInputSurface = RGB(255, 255, 255);
+constexpr COLORREF LightTextInputBorder = RGB(196, 196, 196);
+constexpr COLORREF LightTextComboHover = RGB(247, 247, 247);
+constexpr COLORREF LightTextComboActive = RGB(238, 246, 252);
+constexpr COLORREF LightTextComboHoverBorder = RGB(157, 161, 166);
+constexpr COLORREF LightTextPrimary = RGB(32, 33, 36);
+constexpr COLORREF LightTextSecondary = RGB(96, 99, 104);
+constexpr COLORREF DarkTextCardSurface = RGB(43, 43, 43);
+constexpr COLORREF DarkTextCardBorder = RGB(72, 72, 72);
+constexpr COLORREF DarkTextInputSurface = RGB(50, 50, 50);
+constexpr COLORREF DarkTextInputBorder = RGB(91, 91, 91);
+constexpr COLORREF DarkTextComboHover = RGB(64, 64, 64);
+constexpr COLORREF DarkTextComboActive = RGB(51, 75, 97);
+constexpr COLORREF DarkTextComboHoverBorder = RGB(116, 119, 124);
+constexpr COLORREF DarkTextPrimary = RGB(247, 250, 252);
+constexpr COLORREF DarkTextSecondary = RGB(190, 192, 197);
+constexpr COLORREF TextInputAccent = RGB(0, 120, 212);
 constexpr int MagnifierSampleSize = 17;
 constexpr int MagnifierZoom = 8;
 constexpr int MagnifierPadding = 5;
@@ -667,6 +686,76 @@ LRESULT CALLBACK OverlayWindow::EditProc(HWND window, UINT message, WPARAM wpara
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
+LRESULT CALLBACK OverlayWindow::ComboProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+                                          UINT_PTR id, DWORD_PTR data) {
+    auto* self = reinterpret_cast<OverlayWindow*>(data);
+    switch (message) {
+    case WM_PAINT: {
+        PAINTSTRUCT paint{};
+        HDC dc = BeginPaint(window, &paint);
+        self->drawTextCombo(window, dc);
+        EndPaint(window, &paint);
+        return 0;
+    }
+    case WM_PRINTCLIENT:
+        self->drawTextCombo(window, reinterpret_cast<HDC>(wparam));
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_NCPAINT:
+        return 0;
+    case WM_MOUSEMOVE: {
+        if (self->hoveredTextCombo_ != window) {
+            HWND previous = self->hoveredTextCombo_;
+            self->hoveredTextCombo_ = window;
+            if (previous) InvalidateRect(previous, nullptr, FALSE);
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
+        TrackMouseEvent(&tracking);
+        break;
+    }
+    case WM_MOUSELEAVE:
+        if (self->hoveredTextCombo_ == window) {
+            self->hoveredTextCombo_ = nullptr;
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        break;
+    case WM_LBUTTONDOWN:
+        self->pressedTextCombo_ = window;
+        InvalidateRect(window, nullptr, FALSE);
+        break;
+    case WM_LBUTTONUP:
+    case WM_CAPTURECHANGED:
+    case WM_CANCELMODE:
+        if (self->pressedTextCombo_ == window) {
+            self->pressedTextCombo_ = nullptr;
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        break;
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS: {
+        const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+        InvalidateRect(window, nullptr, FALSE);
+        return result;
+    }
+    case CB_SETCURSEL:
+    case CB_SHOWDROPDOWN:
+    case WM_ENABLE:
+    case WM_SETTEXT: {
+        const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+        InvalidateRect(window, nullptr, FALSE);
+        return result;
+    }
+    case WM_NCDESTROY:
+        if (self->hoveredTextCombo_ == window) self->hoveredTextCombo_ = nullptr;
+        if (self->pressedTextCombo_ == window) self->pressedTextCombo_ = nullptr;
+        RemoveWindowSubclass(window, ComboProc, id);
+        break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+}
+
 LRESULT CALLBACK OverlayWindow::ButtonProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
                                            UINT_PTR id, DWORD_PTR data) {
     auto* self = reinterpret_cast<OverlayWindow*>(data);
@@ -726,22 +815,59 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             const bool highContrast = IsHighContrastEnabled();
             const bool dark = !highContrast && IsSystemDarkMode();
             const COLORREF background = highContrast ? GetSysColor(COLOR_WINDOW)
-                                                      : dark ? RGB(39, 40, 44) : RGB(252, 252, 252);
+                                                      : dark ? DarkTextInputSurface : LightTextInputSurface;
             SetBkMode(editDc, OPAQUE);
             SetBkColor(editDc, background);
             SetTextColor(editDc, highContrast ? GetSysColor(COLOR_WINDOWTEXT)
-                                              : dark ? RGB(247, 250, 252) : RGB(32, 33, 36));
+                                              : dark ? DarkTextPrimary : LightTextPrimary);
             if (!textEditorBrush_) textEditorBrush_ = CreateSolidBrush(background);
             return reinterpret_cast<LRESULT>(textEditorBrush_);
         }
         break;
+    case WM_CTLCOLORLISTBOX: {
+        const HWND list = reinterpret_cast<HWND>(lparam);
+        const auto belongsTo = [list](HWND combo) {
+            COMBOBOXINFO info{sizeof(info)};
+            return combo && GetComboBoxInfo(combo, &info) && info.hwndList == list;
+        };
+        if (belongsTo(textFontCombo_) || belongsTo(textSizeCombo_)) {
+            HDC listDc = reinterpret_cast<HDC>(wparam);
+            const bool highContrast = IsHighContrastEnabled();
+            const bool dark = !highContrast && IsSystemDarkMode();
+            const COLORREF background = highContrast ? GetSysColor(COLOR_WINDOW)
+                                                      : dark ? DarkTextInputSurface : LightTextInputSurface;
+            SetBkMode(listDc, OPAQUE);
+            SetBkColor(listDc, background);
+            SetTextColor(listDc, highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                              : dark ? DarkTextPrimary : LightTextPrimary);
+            if (!textComboBrush_) textComboBrush_ = CreateSolidBrush(background);
+            return reinterpret_cast<LRESULT>(textComboBrush_);
+        }
+        break;
+    }
+    case WM_MEASUREITEM:
+        if (wparam == TextFontComboId || wparam == TextSizeComboId) {
+            auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
+            measure->itemHeight = static_cast<UINT>(scale(32));
+            return TRUE;
+        }
+        break;
     case WM_DRAWITEM:
+        if (wparam == TextFontComboId || wparam == TextSizeComboId) {
+            drawTextComboItem(*reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
+            return TRUE;
+        }
         if (wparam >= ModeRegion && wparam <= ActionCancel) {
             drawButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
             return TRUE;
         }
         break;
     case WM_COMMAND:
+        if (LOWORD(wparam) == TextEditorId &&
+            (HIWORD(wparam) == EN_SETFOCUS || HIWORD(wparam) == EN_KILLFOCUS)) {
+            InvalidateRect(hwnd_, &textInputFrame_, FALSE);
+            return 0;
+        }
         if (LOWORD(wparam) == TextFontComboId && HIWORD(wparam) == CBN_SELCHANGE && textFontCombo_) {
             const int selection = static_cast<int>(SendMessageW(textFontCombo_, CB_GETCURSEL, 0, 0));
             const int length = selection >= 0
@@ -755,6 +881,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
                 textFontFamily_ = std::move(family);
                 updateTextEditorFont();
             }
+            InvalidateRect(textFontCombo_, nullptr, FALSE);
             return 0;
         }
         if (LOWORD(wparam) == TextSizeComboId && HIWORD(wparam) == CBN_SELCHANGE && textSizeCombo_) {
@@ -766,6 +893,14 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
                     updateTextEditorFont();
                 }
             }
+            InvalidateRect(textSizeCombo_, nullptr, FALSE);
+            return 0;
+        }
+        if ((LOWORD(wparam) == TextFontComboId || LOWORD(wparam) == TextSizeComboId) &&
+            (HIWORD(wparam) == CBN_DROPDOWN || HIWORD(wparam) == CBN_CLOSEUP)) {
+            HWND combo = LOWORD(wparam) == TextFontComboId ? textFontCombo_ : textSizeCombo_;
+            applyTextComboTheme(combo);
+            InvalidateRect(combo, nullptr, FALSE);
             return 0;
         }
         if (HIWORD(wparam) == BN_CLICKED) {
@@ -783,9 +918,12 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             DeleteObject(textEditorBrush_);
             textEditorBrush_ = nullptr;
         }
-        const bool darkControls = !IsHighContrastEnabled() && IsSystemDarkMode();
-        if (textFontCombo_) SetWindowTheme(textFontCombo_, darkControls ? L"DarkMode_Explorer" : L"Explorer", nullptr);
-        if (textSizeCombo_) SetWindowTheme(textSizeCombo_, darkControls ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        if (textComboBrush_) {
+            DeleteObject(textComboBrush_);
+            textComboBrush_ = nullptr;
+        }
+        applyTextComboTheme(textFontCombo_);
+        applyTextComboTheme(textSizeCombo_);
         RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
         return 0;
     }
@@ -962,6 +1100,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         textControlsFont_ = nullptr;
         if (textEditorBrush_) DeleteObject(textEditorBrush_);
         textEditorBrush_ = nullptr;
+        if (textComboBrush_) DeleteObject(textComboBrush_);
+        textComboBrush_ = nullptr;
         tooltip_ = nullptr;
         hwnd_ = nullptr;
         return 0;
@@ -1149,6 +1289,211 @@ void OverlayWindow::drawButton(const DRAWITEMSTRUCT& item) {
     }
 }
 
+void OverlayWindow::drawTextComboItem(const DRAWITEMSTRUCT& item) {
+    RECT rect = item.rcItem;
+    const bool highContrast = IsHighContrastEnabled();
+    const bool dark = !highContrast && IsSystemDarkMode();
+    const bool closed = (item.itemState & ODS_COMBOBOXEDIT) != 0;
+    const bool selected = !closed && (item.itemState & ODS_SELECTED) != 0;
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+    const COLORREF surface = highContrast ? GetSysColor(COLOR_WINDOW)
+                                          : dark ? DarkTextInputSurface : LightTextInputSurface;
+    const COLORREF selectedSurface = highContrast ? GetSysColor(COLOR_HIGHLIGHT)
+                                                  : dark ? DarkToolbarHover : LightToolbarHover;
+    const COLORREF textColor = highContrast
+                                   ? GetSysColor(selected ? COLOR_HIGHLIGHTTEXT
+                                                        : disabled ? COLOR_GRAYTEXT : COLOR_WINDOWTEXT)
+                                   : disabled ? (dark ? DarkToolbarDisabled : LightToolbarDisabled)
+                                              : dark ? DarkTextPrimary : LightTextPrimary;
+    HBRUSH background = CreateSolidBrush(surface);
+    FillRect(item.hDC, &rect, background);
+    DeleteObject(background);
+    if (selected) {
+        RECT selection = rect;
+        InflateRect(&selection, -scale(3), -scale(2));
+        FillRoundRect(item.hDC, selection, scale(8), selectedSurface, selectedSurface);
+    }
+
+    const int itemIndex = static_cast<int>(item.itemID);
+    if (itemIndex < 0) return;
+    const int length = static_cast<int>(SendMessageW(item.hwndItem, CB_GETLBTEXTLEN, itemIndex, 0));
+    if (length < 0) return;
+    std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+    SendMessageW(item.hwndItem, CB_GETLBTEXT, itemIndex, reinterpret_cast<LPARAM>(text.data()));
+    text.resize(static_cast<std::size_t>(length));
+
+    const bool current = !closed && SendMessageW(item.hwndItem, CB_GETCURSEL, 0, 0) == itemIndex;
+    int textLeft = rect.left + scale(12);
+    if (current) {
+        const int centerY = (rect.top + rect.bottom) / 2;
+        HPEN checkPen = CreatePen(PS_SOLID, std::max(1, scale(2)),
+                                  highContrast && selected ? GetSysColor(COLOR_HIGHLIGHTTEXT)
+                                                           : TextInputAccent);
+        const auto previousPen = SelectObject(item.hDC, checkPen);
+        MoveToEx(item.hDC, rect.left + scale(8), centerY, nullptr);
+        LineTo(item.hDC, rect.left + scale(11), centerY + scale(3));
+        LineTo(item.hDC, rect.left + scale(17), centerY - scale(4));
+        SelectObject(item.hDC, previousPen);
+        DeleteObject(checkPen);
+        textLeft = rect.left + scale(26);
+    }
+
+    HFONT itemFont = nullptr;
+    if (item.CtlID == TextFontComboId && !text.empty()) {
+        itemFont = CreateFontW(-scale(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                               CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, text.c_str());
+    }
+    HGDIOBJ previousFont = nullptr;
+    if (itemFont) previousFont = SelectObject(item.hDC, itemFont);
+    else if (textControlsFont_) previousFont = SelectObject(item.hDC, textControlsFont_);
+    SetBkMode(item.hDC, TRANSPARENT);
+    SetTextColor(item.hDC, textColor);
+    RECT textRect{textLeft, rect.top, rect.right - scale(8), rect.bottom};
+    DrawTextW(item.hDC, text.c_str(), static_cast<int>(text.size()), &textRect,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (previousFont) SelectObject(item.hDC, previousFont);
+    if (itemFont) DeleteObject(itemFont);
+    if ((item.itemState & ODS_FOCUS) != 0 && !closed) {
+        RECT focus = rect;
+        InflateRect(&focus, -scale(5), -scale(4));
+        DrawFocusRect(item.hDC, &focus);
+    }
+}
+
+void OverlayWindow::drawTextCombo(HWND combo, HDC dc) const {
+    if (!combo || !dc) return;
+    RECT rect{};
+    GetClientRect(combo, &rect);
+    if (IsRectEmpty(&rect)) return;
+
+    const bool highContrast = IsHighContrastEnabled();
+    const bool dark = !highContrast && IsSystemDarkMode();
+    const bool disabled = !IsWindowEnabled(combo);
+    const bool hovered = hoveredTextCombo_ == combo;
+    const bool pressed = pressedTextCombo_ == combo;
+    const bool focused = GetFocus() == combo;
+    const bool dropped = SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0) != FALSE;
+
+    // GDI's RoundRect deliberately leaves the four outer corner pixels untouched.
+    // Clear the entire client area with the surrounding card surface first so the
+    // native combo background cannot show through those pixels.
+    const COLORREF cornerSurface = highContrast ? GetSysColor(COLOR_WINDOW)
+                                                 : dark ? DarkTextCardSurface : LightTextCardSurface;
+    HBRUSH cornerBrush = CreateSolidBrush(cornerSurface);
+    FillRect(dc, &rect, cornerBrush);
+    DeleteObject(cornerBrush);
+
+    COLORREF surface{};
+    COLORREF border{};
+    COLORREF textColor{};
+    COLORREF arrowSurface{};
+    COLORREF arrowColor{};
+    if (highContrast) {
+        surface = GetSysColor(COLOR_WINDOW);
+        border = GetSysColor(focused || dropped ? COLOR_HIGHLIGHT : COLOR_WINDOWTEXT);
+        textColor = GetSysColor(disabled ? COLOR_GRAYTEXT : COLOR_WINDOWTEXT);
+        arrowSurface = GetSysColor(pressed || dropped ? COLOR_HIGHLIGHT : COLOR_WINDOW);
+        arrowColor = GetSysColor(pressed || dropped ? COLOR_HIGHLIGHTTEXT
+                                                    : disabled ? COLOR_GRAYTEXT : COLOR_WINDOWTEXT);
+    } else {
+        surface = pressed ? (dark ? DarkToolbarPressed : LightToolbarPressed)
+                : hovered ? (dark ? DarkTextComboHover : LightTextComboHover)
+                          : (dark ? DarkTextInputSurface : LightTextInputSurface);
+        border = focused || dropped ? TextInputAccent
+               : hovered ? (dark ? DarkTextComboHoverBorder : LightTextComboHoverBorder)
+                         : (dark ? DarkTextInputBorder : LightTextInputBorder);
+        textColor = disabled ? (dark ? DarkToolbarDisabled : LightToolbarDisabled)
+                             : (dark ? DarkTextPrimary : LightTextPrimary);
+        arrowSurface = pressed || dropped ? (dark ? DarkTextComboActive : LightTextComboActive)
+                                          : surface;
+        arrowColor = disabled ? (dark ? DarkToolbarDisabled : LightToolbarDisabled)
+                              : dropped ? TextInputAccent
+                                        : (dark ? DarkTextSecondary : LightTextSecondary);
+    }
+
+    FillRoundRect(dc, rect, scale(7), surface, border);
+    const int arrowWidth = std::min(scale(36), static_cast<int>(rect.right - rect.left));
+    RECT arrowRect{rect.right - arrowWidth, rect.top + scale(2), rect.right - scale(2), rect.bottom - scale(2)};
+    FillRoundRect(dc, arrowRect, scale(6), arrowSurface, arrowSurface);
+
+    const COLORREF separator = highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                            : dark ? DarkTextInputBorder : LightTextInputBorder;
+    HPEN separatorPen = CreatePen(PS_SOLID, std::max(1, scale(1)), separator);
+    HGDIOBJ previousPen = SelectObject(dc, separatorPen);
+    MoveToEx(dc, arrowRect.left, rect.top + scale(7), nullptr);
+    LineTo(dc, arrowRect.left, rect.bottom - scale(7));
+    SelectObject(dc, previousPen);
+    DeleteObject(separatorPen);
+
+    std::wstring text;
+    const int selection = static_cast<int>(SendMessageW(combo, CB_GETCURSEL, 0, 0));
+    if (selection >= 0) {
+        const int length = static_cast<int>(SendMessageW(combo, CB_GETLBTEXTLEN, selection, 0));
+        if (length > 0) {
+            text.resize(static_cast<std::size_t>(length) + 1, L'\0');
+            SendMessageW(combo, CB_GETLBTEXT, selection, reinterpret_cast<LPARAM>(text.data()));
+            text.resize(static_cast<std::size_t>(length));
+        }
+    }
+
+    HFONT itemFont = nullptr;
+    if (combo == textFontCombo_ && !text.empty()) {
+        itemFont = CreateFontW(-scale(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                               CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, text.c_str());
+    }
+    HGDIOBJ previousFont = nullptr;
+    if (itemFont) previousFont = SelectObject(dc, itemFont);
+    else if (textControlsFont_) previousFont = SelectObject(dc, textControlsFont_);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, textColor);
+    RECT textRect{rect.left + scale(12), rect.top, arrowRect.left - scale(9), rect.bottom};
+    DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &textRect,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (previousFont) SelectObject(dc, previousFont);
+    if (itemFont) DeleteObject(itemFont);
+
+    const int centerX = (arrowRect.left + arrowRect.right) / 2;
+    const int centerY = (arrowRect.top + arrowRect.bottom) / 2;
+    HPEN arrowPen = CreatePen(PS_SOLID, std::max(1, scale(2)), arrowColor);
+    previousPen = SelectObject(dc, arrowPen);
+    MoveToEx(dc, centerX - scale(4), centerY - scale(2), nullptr);
+    LineTo(dc, centerX, centerY + scale(2));
+    LineTo(dc, centerX + scale(4), centerY - scale(2));
+    SelectObject(dc, previousPen);
+    DeleteObject(arrowPen);
+
+    if (focused || dropped) {
+        RECT focus = rect;
+        InflateRect(&focus, -scale(1), -scale(1));
+        HPEN focusPen = CreatePen(PS_SOLID, std::max(1, scale(2)), border);
+        HGDIOBJ oldPen = SelectObject(dc, focusPen);
+        HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        RoundRect(dc, focus.left, focus.top, focus.right, focus.bottom, scale(7), scale(7));
+        SelectObject(dc, oldBrush);
+        SelectObject(dc, oldPen);
+        DeleteObject(focusPen);
+    }
+}
+
+void OverlayWindow::applyTextComboTheme(HWND combo) const {
+    if (!combo) return;
+    const bool dark = !IsHighContrastEnabled() && IsSystemDarkMode();
+    const wchar_t* theme = dark ? L"DarkMode_Explorer" : L"Explorer";
+    SetWindowTheme(combo, L"", nullptr);
+    COMBOBOXINFO info{sizeof(info)};
+    if (!GetComboBoxInfo(combo, &info) || !info.hwndList) return;
+    SetWindowTheme(info.hwndList, theme, nullptr);
+    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUNDSMALL;
+    DwmSetWindowAttribute(info.hwndList, DWMWA_WINDOW_CORNER_PREFERENCE,
+                          &corners, sizeof(corners));
+    const BOOL darkMode = dark ? TRUE : FALSE;
+    DwmSetWindowAttribute(info.hwndList, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                          &darkMode, sizeof(darkMode));
+    InvalidateRect(combo, nullptr, FALSE);
+}
+
 int OverlayWindow::buttonAt(POINT point) const noexcept {
     for (const auto& button : modeButtons_) if (PointIn(button.rect, point)) return button.id;
     for (const auto& button : toolButtons_) if (PointIn(button.rect, point)) return button.id;
@@ -1332,8 +1677,8 @@ void OverlayWindow::beginText(POINT point) {
     RECT placementBounds{selectionTopLeft.x, selectionTopLeft.y,
                          selectionBottomRight.x, selectionBottomRight.y};
     const int placementMargin = scale(6);
-    const int frameWidth = scale(420);
-    const int frameHeight = scale(152);
+    const int frameWidth = scale(440);
+    const int frameHeight = scale(150);
     if (placementBounds.right - placementBounds.left < frameWidth + placementMargin * 2 ||
         placementBounds.bottom - placementBounds.top < frameHeight + placementMargin * 2) {
         placementBounds = clientBounds;
@@ -1342,25 +1687,30 @@ void OverlayWindow::beginText(POINT point) {
     const int minimumTop = placementBounds.top + placementMargin;
     const int maximumLeft = std::max(minimumLeft, static_cast<int>(placementBounds.right) - placementMargin - frameWidth);
     const int maximumTop = std::max(minimumTop, static_cast<int>(placementBounds.bottom) - placementMargin - frameHeight);
-    const int frameLeft = std::clamp(static_cast<int>(clientPoint.x) - scale(22), minimumLeft, maximumLeft);
-    const int frameTop = std::clamp(static_cast<int>(clientPoint.y) - scale(74), minimumTop, maximumTop);
+    const int frameLeft = std::clamp(static_cast<int>(clientPoint.x) - scale(26), minimumLeft, maximumLeft);
+    const int frameTop = std::clamp(static_cast<int>(clientPoint.y) - scale(50), minimumTop, maximumTop);
     textEditorFrame_ = {frameLeft, frameTop, frameLeft + frameWidth, frameTop + frameHeight};
 
-    const int padding = scale(10);
-    const int comboTop = textEditorFrame_.top + scale(26);
-    const int fontComboWidth = scale(270);
-    const int sizeComboWidth = scale(120);
-    const int fontComboLeft = textEditorFrame_.left + padding;
-    const int sizeComboLeft = fontComboLeft + fontComboWidth + scale(10);
-    const int editorHeight = scale(56);
-    const int editorLeft = textEditorFrame_.left + padding;
-    const int editorTop = textEditorFrame_.top + scale(66);
-    const int editorWidth = frameWidth - padding * 2;
+    const int padding = scale(12);
+    const int comboTop = textEditorFrame_.top + scale(106);
+    const int fontComboWidth = scale(244);
+    const int sizeComboWidth = scale(84);
+    const int fontComboLeft = textEditorFrame_.left + scale(52);
+    const int sizeComboLeft = textEditorFrame_.left + scale(344);
+    textInputFrame_ = {textEditorFrame_.left + padding, textEditorFrame_.top + scale(38),
+                       textEditorFrame_.right - padding, textEditorFrame_.top + scale(94)};
+    const int editorInset = scale(2);
+    const int editorLeft = textInputFrame_.left + editorInset;
+    const int editorTop = textInputFrame_.top + editorInset;
+    const int editorWidth = textInputFrame_.right - textInputFrame_.left - editorInset * 2;
+    const int editorHeight = textInputFrame_.bottom - textInputFrame_.top - editorInset * 2;
     const POINT originClient{editorLeft + scale(12), editorTop + scale(8)};
     textOrigin_ = relativePoint(desktopFromClient(originClient));
 
     if (textEditorBrush_) DeleteObject(textEditorBrush_);
     textEditorBrush_ = nullptr;
+    if (textComboBrush_) DeleteObject(textComboBrush_);
+    textComboBrush_ = nullptr;
     if (textControlsFont_) DeleteObject(textControlsFont_);
     textControlsFont_ = CreateFontW(-scale(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -1368,12 +1718,14 @@ void OverlayWindow::beginText(POINT point) {
                                     L"Segoe UI Variable Text");
     textFontCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"",
                                      WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
-                                         CBS_DROPDOWNLIST | CBS_AUTOHSCROLL,
+                                         CBS_DROPDOWNLIST | CBS_AUTOHSCROLL |
+                                         CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
                                      fontComboLeft, comboTop, fontComboWidth, scale(260),
                                      hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(TextFontComboId)),
                                      instance_, nullptr);
     textSizeCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"",
-                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+                                         CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
                                      sizeComboLeft, comboTop, sizeComboWidth, scale(260),
                                      hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(TextSizeComboId)),
                                      instance_, nullptr);
@@ -1395,7 +1747,10 @@ void OverlayWindow::beginText(POINT point) {
             }
             if (selected >= 0) SendMessageW(textFontCombo_, CB_SETCURSEL, selected, 0);
             SendMessageW(textFontCombo_, WM_SETFONT, reinterpret_cast<WPARAM>(textControlsFont_), TRUE);
+            SendMessageW(textFontCombo_, CB_SETDROPPEDWIDTH, scale(320), 0);
+            SendMessageW(textFontCombo_, CB_SETMINVISIBLE, 8, 0);
             SetWindowSubclass(textFontCombo_, EditProc, 2, reinterpret_cast<DWORD_PTR>(hwnd_));
+            SetWindowSubclass(textFontCombo_, ComboProc, 20, reinterpret_cast<DWORD_PTR>(this));
         }
         if (textSizeCombo_) {
             int selected = 0;
@@ -1408,11 +1763,13 @@ void OverlayWindow::beginText(POINT point) {
             }
             SendMessageW(textSizeCombo_, CB_SETCURSEL, selected, 0);
             SendMessageW(textSizeCombo_, WM_SETFONT, reinterpret_cast<WPARAM>(textControlsFont_), TRUE);
+            SendMessageW(textSizeCombo_, CB_SETDROPPEDWIDTH, scale(112), 0);
+            SendMessageW(textSizeCombo_, CB_SETMINVISIBLE, 8, 0);
             SetWindowSubclass(textSizeCombo_, EditProc, 3, reinterpret_cast<DWORD_PTR>(hwnd_));
+            SetWindowSubclass(textSizeCombo_, ComboProc, 21, reinterpret_cast<DWORD_PTR>(this));
         }
-        const bool dark = !IsHighContrastEnabled() && IsSystemDarkMode();
-        if (textFontCombo_) SetWindowTheme(textFontCombo_, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
-        if (textSizeCombo_) SetWindowTheme(textSizeCombo_, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        applyTextComboTheme(textFontCombo_);
+        applyTextComboTheme(textSizeCombo_);
         updateTextEditorFont();
         SetWindowTheme(textEditor_, L"", nullptr);
         SendMessageW(textEditor_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
@@ -1436,6 +1793,7 @@ void OverlayWindow::beginText(POINT point) {
         if (textControlsFont_) DeleteObject(textControlsFont_);
         textControlsFont_ = nullptr;
         textEditorFrame_ = {};
+        textInputFrame_ = {};
     }
 }
 
@@ -1466,11 +1824,13 @@ void OverlayWindow::commitText(bool cancel) {
     }
     RemoveWindowSubclass(textEditor_, EditProc, 1); DestroyWindow(textEditor_); textEditor_ = nullptr;
     if (textFontCombo_) {
+        RemoveWindowSubclass(textFontCombo_, ComboProc, 20);
         RemoveWindowSubclass(textFontCombo_, EditProc, 2);
         DestroyWindow(textFontCombo_);
     }
     textFontCombo_ = nullptr;
     if (textSizeCombo_) {
+        RemoveWindowSubclass(textSizeCombo_, ComboProc, 21);
         RemoveWindowSubclass(textSizeCombo_, EditProc, 3);
         DestroyWindow(textSizeCombo_);
     }
@@ -1481,7 +1841,10 @@ void OverlayWindow::commitText(bool cancel) {
     textControlsFont_ = nullptr;
     if (textEditorBrush_) DeleteObject(textEditorBrush_);
     textEditorBrush_ = nullptr;
+    if (textComboBrush_) DeleteObject(textComboBrush_);
+    textComboBrush_ = nullptr;
     textEditorFrame_ = {};
+    textInputFrame_ = {};
     InvalidateRect(hwnd_, &previousFrame, FALSE);
     SetFocus(hwnd_); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -1859,37 +2222,82 @@ void OverlayWindow::paint() {
     drawGroupSurface(toolButtons_);
     if (textEditor_ && !IsRectEmpty(&textEditorFrame_)) {
         const bool dark = !highContrast && IsSystemDarkMode();
-        const COLORREF editorBackground = highContrast ? GetSysColor(COLOR_WINDOW)
-                                                       : dark ? RGB(39, 40, 44) : RGB(252, 252, 252);
-        const COLORREF editorBorder = highContrast ? GetSysColor(COLOR_HIGHLIGHT)
-                                                   : dark ? RGB(92, 170, 255) : RGB(0, 95, 184);
-        FillRoundRect(dc, textEditorFrame_, scale(12), editorBackground, editorBorder);
+        const COLORREF cardSurface = highContrast ? GetSysColor(COLOR_WINDOW)
+                                                  : dark ? DarkTextCardSurface : LightTextCardSurface;
+        const COLORREF cardBorder = highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                                 : dark ? DarkTextCardBorder : LightTextCardBorder;
+        const COLORREF inputSurface = highContrast ? GetSysColor(COLOR_WINDOW)
+                                                   : dark ? DarkTextInputSurface : LightTextInputSurface;
+        const COLORREF inputBorder = highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                                  : dark ? DarkTextInputBorder : LightTextInputBorder;
+        const COLORREF primaryText = highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                                  : dark ? DarkTextPrimary : LightTextPrimary;
+        const COLORREF secondaryText = highContrast ? GetSysColor(COLOR_WINDOWTEXT)
+                                                    : dark ? DarkTextSecondary : LightTextSecondary;
+        if (!highContrast) {
+            RECT shadow = textEditorFrame_;
+            OffsetRect(&shadow, 0, scale(3));
+            FillRoundRect(dc, shadow, scale(14), dark ? RGB(24, 24, 24) : RGB(205, 205, 205),
+                          dark ? RGB(24, 24, 24) : RGB(205, 205, 205));
+        }
+        FillRoundRect(dc, textEditorFrame_, scale(14), cardSurface, cardBorder);
+        FillRoundRect(dc, textInputFrame_, scale(10), inputSurface, inputBorder);
+        if (GetFocus() == textEditor_) {
+            HPEN focusPen = CreatePen(PS_SOLID, std::max(1, scale(2)),
+                                      highContrast ? GetSysColor(COLOR_HIGHLIGHT) : TextInputAccent);
+            const auto previousPen = SelectObject(dc, focusPen);
+            const auto previousBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+            RoundRect(dc, textInputFrame_.left, textInputFrame_.top,
+                      textInputFrame_.right, textInputFrame_.bottom, scale(10), scale(10));
+            SelectObject(dc, previousBrush);
+            SelectObject(dc, previousPen);
+            DeleteObject(focusPen);
+        }
 
-        HFONT hintFont = CreateFontW(-scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                                     L"Segoe UI Variable Text");
-        const auto previousFont = SelectObject(dc, hintFont);
+        HFONT titleFont = CreateFontW(-scale(13), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                      L"Segoe UI Variable Text");
+        HFONT captionFont = CreateFontW(-scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                        L"Segoe UI Variable Text");
+        HFONT labelFont = CreateFontW(-scale(12), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                      L"Segoe UI Variable Text");
         SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, highContrast ? GetSysColor(COLOR_WINDOWTEXT)
-                                     : dark ? RGB(184, 186, 191) : RGB(96, 99, 104));
-        RECT fontLabelRect{textEditorFrame_.left + scale(10), textEditorFrame_.top + scale(6),
-                           textEditorFrame_.left + scale(280), textEditorFrame_.top + scale(24)};
-        RECT sizeLabelRect{textEditorFrame_.left + scale(290), textEditorFrame_.top + scale(6),
-                           textEditorFrame_.right - scale(10), textEditorFrame_.top + scale(24)};
+        const auto previousFont = SelectObject(dc, titleFont);
+        SetTextColor(dc, primaryText);
+        RECT titleRect{textEditorFrame_.left + scale(12), textEditorFrame_.top + scale(7),
+                       textEditorFrame_.left + scale(120), textEditorFrame_.top + scale(32)};
+        const auto title = Localized(StringId::AddText, language_);
+        DrawTextW(dc, title.data(), static_cast<int>(title.size()), &titleRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, captionFont);
+        SetTextColor(dc, secondaryText);
+        RECT hintRect{textEditorFrame_.left + scale(120), textEditorFrame_.top + scale(7),
+                      textEditorFrame_.right - scale(12), textEditorFrame_.top + scale(32)};
+        const auto hint = Localized(StringId::TextInputHint, language_);
+        DrawTextW(dc, hint.data(), static_cast<int>(hint.size()), &hintRect,
+                  DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+        SelectObject(dc, labelFont);
+        SetTextColor(dc, secondaryText);
+        RECT fontLabelRect{textEditorFrame_.left + scale(12), textEditorFrame_.top + scale(105),
+                           textEditorFrame_.left + scale(48), textEditorFrame_.top + scale(139)};
+        RECT sizeLabelRect{textEditorFrame_.left + scale(308), textEditorFrame_.top + scale(105),
+                           textEditorFrame_.left + scale(340), textEditorFrame_.top + scale(139)};
         const auto fontLabel = Localized(StringId::Font, language_);
         const auto sizeLabel = Localized(StringId::FontSize, language_);
         DrawTextW(dc, fontLabel.data(), static_cast<int>(fontLabel.size()), &fontLabelRect,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         DrawTextW(dc, sizeLabel.data(), static_cast<int>(sizeLabel.size()), &sizeLabelRect,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        RECT hintRect{textEditorFrame_.left + scale(12), textEditorFrame_.top + scale(126),
-                      textEditorFrame_.right - scale(12), textEditorFrame_.bottom - scale(6)};
-        const auto hint = Localized(StringId::TextInputHint, language_);
-        DrawTextW(dc, hint.data(), static_cast<int>(hint.size()), &hintRect,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         SelectObject(dc, previousFont);
-        DeleteObject(hintFont);
+        DeleteObject(labelFont);
+        DeleteObject(captionFont);
+        DeleteObject(titleFont);
     }
     if (buffered) {
         if (savedBufferState != 0) RestoreDC(dc, savedBufferState);
