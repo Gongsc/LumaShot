@@ -61,6 +61,7 @@ struct TextAnnotation {
     std::wstring text;
     ColorRgba color;
     float fontSize{20.0f};
+    std::wstring fontFamily{L"Segoe UI Variable Text"};
 };
 
 using Annotation = std::variant<PenStroke, RectangleAnnotation, ArrowAnnotation, TextAnnotation>;

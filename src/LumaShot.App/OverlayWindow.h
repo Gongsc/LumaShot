@@ -20,14 +20,17 @@ public:
     [[nodiscard]] HdrCalibration calibration() const noexcept { return calibration_; }
 
 private:
-    enum class DragKind { None, NewSelection, Move, Left, Top, Right, Bottom, TopLeft, TopRight, BottomLeft, BottomRight, Drawing };
+    enum class DragKind { None, NewSelection, Move, Left, Top, Right, Bottom, TopLeft, TopRight, BottomLeft, BottomRight, Drawing, MovingText };
     struct Button { RECT rect{}; int id{}; StringId label{}; };
 
     HINSTANCE instance_{};
     HWND hwnd_{};
     HWND textEditor_{};
+    HWND textFontCombo_{};
+    HWND textSizeCombo_{};
     HWND tooltip_{};
     HFONT textEditorFont_{};
+    HFONT textControlsFont_{};
     HBRUSH textEditorBrush_{};
     RECT textEditorFrame_{};
     CaptureFrameSet frames_;
@@ -51,6 +54,12 @@ private:
     AnnotationDocument annotations_;
     std::optional<Annotation> draft_;
     PointF textOrigin_{};
+    std::optional<std::size_t> hoveredTextIndex_;
+    std::optional<std::size_t> movingTextIndex_;
+    std::optional<TextAnnotation> movingText_;
+    PointF movingTextInitialOrigin_{};
+    std::wstring textFontFamily_{L"Segoe UI Variable Text"};
+    int textFontSize_{20};
     HWND hoveredWindow_{};
     HMONITOR uiMonitor_{};
     bool selectionLocked_{};
@@ -104,6 +113,12 @@ private:
     void finishDrawing();
     void beginText(POINT screenPoint);
     void commitText(bool cancel);
+    void updateTextEditorFont();
+    [[nodiscard]] RectI textBounds(const TextAnnotation& text) const;
+    [[nodiscard]] std::optional<std::size_t> textAt(POINT screenPoint) const;
+    void beginMovingText(std::size_t index, POINT screenPoint);
+    void updateMovingText(POINT screenPoint);
+    void finishMovingText(bool cancel);
     bool perform(OverlayAction action);
     [[nodiscard]] int scale(int value) const noexcept;
 };

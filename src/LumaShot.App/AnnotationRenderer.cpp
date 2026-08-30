@@ -61,7 +61,9 @@ void RenderAnnotations(ID2D1RenderTarget* target, ID2D1Factory* factory, IDWrite
                 wchar_t locale[LOCALE_NAME_MAX_LENGTH]{};
                 GetUserDefaultLocaleName(locale, static_cast<int>(std::size(locale)));
                 ComPtr<IDWriteTextFormat> format;
-                if (FAILED(writeFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                const wchar_t* fontFamily = item.fontFamily.empty() ? L"Segoe UI Variable Text"
+                                                                   : item.fontFamily.c_str();
+                if (FAILED(writeFactory->CreateTextFormat(fontFamily, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, item.fontSize, locale, &format))) return;
                 target->DrawTextW(item.text.c_str(), static_cast<UINT32>(item.text.size()), format.Get(),
                     D2D1::RectF(item.origin.x, item.origin.y, item.origin.x + 1200.0f, item.origin.y + item.fontSize * 8.0f), brush.Get());

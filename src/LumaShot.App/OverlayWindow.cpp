@@ -39,6 +39,8 @@ constexpr int ActionCopy = 209;
 constexpr int ActionSave = 210;
 constexpr int ActionCancel = 211;
 constexpr int TextEditorId = 300;
+constexpr int TextFontComboId = 301;
+constexpr int TextSizeComboId = 302;
 constexpr COLORREF LightToolbarSurface = RGB(252, 252, 252);
 constexpr COLORREF LightToolbarBorder = RGB(217, 224, 230);
 constexpr COLORREF LightToolbarHover = RGB(233, 233, 233);
@@ -64,6 +66,7 @@ constexpr std::array<ColorRgba, 6> AnnotationColors{{
     {255, 55, 55, 255}, {255, 213, 55, 255}, {60, 205, 95, 255},
     {50, 205, 230, 255}, {65, 125, 255, 255}, {255, 255, 255, 255}}};
 constexpr std::array<float, 3> AnnotationWidths{2.0f, 4.0f, 8.0f};
+constexpr std::array<int, 11> TextSizeOptions{{12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48}};
 constexpr std::array ButtonDefinitions{
     std::pair{ModeRegion, StringId::Region}, std::pair{ModeWindow, StringId::Window},
     std::pair{ModeMonitor, StringId::Monitor}, std::pair{ModeAll, StringId::VirtualDesktop},
@@ -76,6 +79,31 @@ constexpr std::array ButtonDefinitions{
 
 POINT PointFromLParam(LPARAM value) { return POINT{GET_X_LPARAM(value), GET_Y_LPARAM(value)}; }
 bool PointIn(const RECT& rect, POINT point) { return PtInRect(&rect, point) != FALSE; }
+
+int CALLBACK CollectFontFamily(const LOGFONTW* font, const TEXTMETRICW*, DWORD, LPARAM data) {
+    if (!font || font->lfFaceName[0] == L'@') return 1;
+    auto& families = *reinterpret_cast<std::vector<std::wstring>*>(data);
+    families.emplace_back(font->lfFaceName);
+    return 1;
+}
+
+std::vector<std::wstring> InstalledFontFamilies(HWND window) {
+    std::vector<std::wstring> families;
+    if (HDC dc = GetDC(window)) {
+        LOGFONTW filter{};
+        filter.lfCharSet = DEFAULT_CHARSET;
+        EnumFontFamiliesExW(dc, &filter, CollectFontFamily,
+                            reinterpret_cast<LPARAM>(&families), 0);
+        ReleaseDC(window, dc);
+    }
+    std::sort(families.begin(), families.end(), [](const auto& left, const auto& right) {
+        return CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+    });
+    families.erase(std::unique(families.begin(), families.end(), [](const auto& left, const auto& right) {
+        return CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_EQUAL;
+    }), families.end());
+    return families;
+}
 
 bool IsHighContrastEnabled() noexcept {
     HIGHCONTRASTW value{sizeof(value)};
@@ -627,6 +655,10 @@ LRESULT CALLBACK OverlayWindow::EditProc(HWND window, UINT message, WPARAM wpara
         return DLGC_WANTALLKEYS;
     }
     if (message == WM_KEYDOWN && (wparam == VK_RETURN || wparam == VK_ESCAPE)) {
+        const int controlId = GetDlgCtrlID(window);
+        const bool isCombo = controlId == TextFontComboId || controlId == TextSizeComboId;
+        if (isCombo && SendMessageW(window, CB_GETDROPPEDSTATE, 0, 0) != FALSE)
+            return DefSubclassProc(window, message, wparam, lparam);
         if (wparam == VK_RETURN && HasImeComposition(window)) return DefSubclassProc(window, message, wparam, lparam);
         PostMessageW(reinterpret_cast<HWND>(data), CommitTextMessage, wparam == VK_ESCAPE, 0);
         return 0;
@@ -710,6 +742,32 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         }
         break;
     case WM_COMMAND:
+        if (LOWORD(wparam) == TextFontComboId && HIWORD(wparam) == CBN_SELCHANGE && textFontCombo_) {
+            const int selection = static_cast<int>(SendMessageW(textFontCombo_, CB_GETCURSEL, 0, 0));
+            const int length = selection >= 0
+                                   ? static_cast<int>(SendMessageW(textFontCombo_, CB_GETLBTEXTLEN, selection, 0))
+                                   : 0;
+            if (length > 0) {
+                std::wstring family(static_cast<std::size_t>(length) + 1, L'\0');
+                SendMessageW(textFontCombo_, CB_GETLBTEXT, selection,
+                             reinterpret_cast<LPARAM>(family.data()));
+                family.resize(static_cast<std::size_t>(length));
+                textFontFamily_ = std::move(family);
+                updateTextEditorFont();
+            }
+            return 0;
+        }
+        if (LOWORD(wparam) == TextSizeComboId && HIWORD(wparam) == CBN_SELCHANGE && textSizeCombo_) {
+            const int selection = static_cast<int>(SendMessageW(textSizeCombo_, CB_GETCURSEL, 0, 0));
+            if (selection >= 0) {
+                const LRESULT size = SendMessageW(textSizeCombo_, CB_GETITEMDATA, selection, 0);
+                if (size >= TextSizeOptions.front() && size <= TextSizeOptions.back()) {
+                    textFontSize_ = static_cast<int>(size);
+                    updateTextEditorFont();
+                }
+            }
+            return 0;
+        }
         if (HIWORD(wparam) == BN_CLICKED) {
             const int id = LOWORD(wparam);
             if ((id >= ModeRegion && id <= ModeAll) || (id >= ToolPen && id <= ActionCancel)) {
@@ -720,13 +778,17 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         break;
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
-    case WM_SYSCOLORCHANGE:
+    case WM_SYSCOLORCHANGE: {
         if (textEditorBrush_) {
             DeleteObject(textEditorBrush_);
             textEditorBrush_ = nullptr;
         }
+        const bool darkControls = !IsHighContrastEnabled() && IsSystemDarkMode();
+        if (textFontCombo_) SetWindowTheme(textFontCombo_, darkControls ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        if (textSizeCombo_) SetWindowTheme(textSizeCombo_, darkControls ? L"DarkMode_Explorer" : L"Explorer", nullptr);
         RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
         return 0;
+    }
     case WM_SETCURSOR: {
         POINT client{};
         GetCursorPos(&client);
@@ -766,7 +828,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         if (pressedButton_ >= 0) { SetCursor(cursorForPoint(client)); return 0; }
         POINT screen = desktopFromClient(client);
         if ((wparam & MK_LBUTTON) != 0) {
-            if (dragKind_ == DragKind::Drawing) updateDrawing(screen);
+            if (dragKind_ == DragKind::MovingText) updateMovingText(screen);
+            else if (dragKind_ == DragKind::Drawing) updateDrawing(screen);
             else if (dragKind_ != DragKind::None) {
                 const int dx = screen.x - dragStart_.x, dy = screen.y - dragStart_.y;
                 RectI next = initialSelection_;
@@ -779,7 +842,15 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
                 selection_ = ClampRect(NormalizeRect(next), frames_.virtualDesktop);
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
-        } else if (mode_ == CaptureMode::Window && !selectionLocked_) updateWindowHover(client);
+        } else {
+            const auto hoveredText = tool_ == AnnotationTool::Text && !textEditor_
+                                       ? textAt(screen) : std::nullopt;
+            if (hoveredText != hoveredTextIndex_) {
+                hoveredTextIndex_ = hoveredText;
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+            if (mode_ == CaptureMode::Window && !selectionLocked_) updateWindowHover(client);
+        }
         SetCursor(cursorForPoint(client));
         return 0;
     }
@@ -793,6 +864,10 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             InflateRect(&previousMagnifier, 4, 4);
         }
         mouseInside_ = false;
+        if (hoveredTextIndex_ && dragKind_ != DragKind::MovingText) {
+            hoveredTextIndex_.reset();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         if (hoveredButton_ >= 0) {
             const int previousId = hoveredButton_;
             hoveredButton_ = -1;
@@ -818,7 +893,10 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             return 0;
         }
         if (!selection_.empty() && tool_ != AnnotationTool::None && ContainsPoint(selection_, screen.x, screen.y)) {
-            if (tool_ == AnnotationTool::Text) beginText(screen); else beginDrawing(screen);
+            if (tool_ == AnnotationTool::Text) {
+                if (const auto textIndex = textAt(screen)) beginMovingText(*textIndex, screen);
+                else beginText(screen);
+            } else beginDrawing(screen);
             return 0;
         }
         dragKind_ = hitSelection(screen);
@@ -838,7 +916,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             SetCursor(cursorForPoint(PointFromLParam(lparam)));
             return 0;
         }
-        if (dragKind_ == DragKind::Drawing) finishDrawing();
+        if (dragKind_ == DragKind::MovingText) finishMovingText(false);
+        else if (dragKind_ == DragKind::Drawing) finishDrawing();
         else {
             POINT screen = desktopFromClient(PointFromLParam(lparam));
             uiMonitor_ = MonitorFromPoint(screen, MONITOR_DEFAULTTONEAREST);
@@ -850,6 +929,11 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     }
     case WM_CAPTURECHANGED:
         if (pressedButton_ >= 0) { pressedButton_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+        if (dragKind_ == DragKind::MovingText) {
+            finishMovingText(true);
+            dragKind_ = DragKind::None;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         return 0;
     case WM_KEYDOWN: {
         const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -863,8 +947,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         }
         if (control && wparam == 'C') { perform(OverlayAction::Copy); return 0; }
         if (control && wparam == 'S') { perform(OverlayAction::Save); return 0; }
-        if (control && wparam == 'Z') { annotations_.undo(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
-        if (control && wparam == 'Y') { annotations_.redo(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+        if (control && wparam == 'Z') { annotations_.undo(); hoveredTextIndex_.reset(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+        if (control && wparam == 'Y') { annotations_.redo(); hoveredTextIndex_.reset(); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
         return 0;
     }
     case CommitTextMessage: commitText(wparam != 0); return 0;
@@ -874,6 +958,8 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         releaseBackBuffer();
         if (textEditorFont_) DeleteObject(textEditorFont_);
         textEditorFont_ = nullptr;
+        if (textControlsFont_) DeleteObject(textControlsFont_);
+        textControlsFont_ = nullptr;
         if (textEditorBrush_) DeleteObject(textEditorBrush_);
         textEditorBrush_ = nullptr;
         tooltip_ = nullptr;
@@ -886,6 +972,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
 
 void OverlayWindow::setMode(CaptureMode mode) {
     mode_ = mode; tool_ = AnnotationTool::None; selectionLocked_ = false; hoveredWindow_ = nullptr;
+    hoveredTextIndex_.reset(); movingTextIndex_.reset(); movingText_.reset();
     POINT cursor{}; GetCursorPos(&cursor);
     uiMonitor_ = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
     if (mode == CaptureMode::VirtualDesktop) { selection_ = frames_.virtualDesktop; selectionLocked_ = true; }
@@ -1074,9 +1161,12 @@ void OverlayWindow::activateButton(int id) {
     switch (id) {
     case ModeRegion: setMode(CaptureMode::Region); break; case ModeWindow: setMode(CaptureMode::Window); break;
     case ModeMonitor: setMode(CaptureMode::Monitor); break; case ModeAll: setMode(CaptureMode::VirtualDesktop); break;
-    case ToolPen: tool_ = AnnotationTool::Pen; break; case ToolRectangle: tool_ = AnnotationTool::Rectangle; break;
-    case ToolArrow: tool_ = AnnotationTool::Arrow; break; case ToolText: tool_ = AnnotationTool::Text; break;
-    case ToolUndo: annotations_.undo(); break; case ToolRedo: annotations_.redo(); break;
+    case ToolPen: tool_ = AnnotationTool::Pen; hoveredTextIndex_.reset(); break;
+    case ToolRectangle: tool_ = AnnotationTool::Rectangle; hoveredTextIndex_.reset(); break;
+    case ToolArrow: tool_ = AnnotationTool::Arrow; hoveredTextIndex_.reset(); break;
+    case ToolText: tool_ = AnnotationTool::Text; break;
+    case ToolUndo: annotations_.undo(); hoveredTextIndex_.reset(); break;
+    case ToolRedo: annotations_.redo(); hoveredTextIndex_.reset(); break;
     case ToolColor: colorIndex_ = (colorIndex_ + 1) % AnnotationColors.size(); break;
     case ToolWidth: lineWidthIndex_ = (lineWidthIndex_ + 1) % AnnotationWidths.size(); break;
     case ActionCopy: perform(OverlayAction::Copy); break; case ActionSave: perform(OverlayAction::Save); break;
@@ -1167,6 +1257,7 @@ HCURSOR OverlayWindow::cursorForPoint(POINT clientPoint) const noexcept {
     const POINT desktopPoint = desktopFromClient(clientPoint);
     if (!selection_.empty() && tool_ != AnnotationTool::None &&
         ContainsPoint(selection_, desktopPoint.x, desktopPoint.y)) {
+        if (tool_ == AnnotationTool::Text && textAt(desktopPoint)) return LoadCursorW(nullptr, IDC_SIZEALL);
         return LoadCursorW(nullptr, tool_ == AnnotationTool::Text ? IDC_IBEAM : IDC_CROSS);
     }
 
@@ -1184,7 +1275,8 @@ HCURSOR OverlayWindow::cursorForDrag(DragKind dragKind) noexcept {
     case DragKind::BottomRight: return LoadCursorW(nullptr, IDC_SIZENWSE);
     case DragKind::TopRight:
     case DragKind::BottomLeft: return LoadCursorW(nullptr, IDC_SIZENESW);
-    case DragKind::Move: return LoadCursorW(nullptr, IDC_SIZEALL);
+    case DragKind::Move:
+    case DragKind::MovingText: return LoadCursorW(nullptr, IDC_SIZEALL);
     case DragKind::NewSelection:
     case DragKind::Drawing: return LoadCursorW(nullptr, IDC_CROSS);
     default: return LoadCursorW(nullptr, IDC_ARROW);
@@ -1240,8 +1332,8 @@ void OverlayWindow::beginText(POINT point) {
     RECT placementBounds{selectionTopLeft.x, selectionTopLeft.y,
                          selectionBottomRight.x, selectionBottomRight.y};
     const int placementMargin = scale(6);
-    const int frameWidth = scale(340);
-    const int frameHeight = scale(62);
+    const int frameWidth = scale(420);
+    const int frameHeight = scale(152);
     if (placementBounds.right - placementBounds.left < frameWidth + placementMargin * 2 ||
         placementBounds.bottom - placementBounds.top < frameHeight + placementMargin * 2) {
         placementBounds = clientBounds;
@@ -1250,33 +1342,79 @@ void OverlayWindow::beginText(POINT point) {
     const int minimumTop = placementBounds.top + placementMargin;
     const int maximumLeft = std::max(minimumLeft, static_cast<int>(placementBounds.right) - placementMargin - frameWidth);
     const int maximumTop = std::max(minimumTop, static_cast<int>(placementBounds.bottom) - placementMargin - frameHeight);
-    const int frameLeft = std::clamp(static_cast<int>(clientPoint.x) - scale(12), minimumLeft, maximumLeft);
-    const int frameTop = std::clamp(static_cast<int>(clientPoint.y) - scale(10), minimumTop, maximumTop);
+    const int frameLeft = std::clamp(static_cast<int>(clientPoint.x) - scale(22), minimumLeft, maximumLeft);
+    const int frameTop = std::clamp(static_cast<int>(clientPoint.y) - scale(74), minimumTop, maximumTop);
     textEditorFrame_ = {frameLeft, frameTop, frameLeft + frameWidth, frameTop + frameHeight};
 
-    const int editorInset = scale(2);
-    const int editorHeight = scale(40);
-    const int editorLeft = textEditorFrame_.left + editorInset;
-    const int editorTop = textEditorFrame_.top + editorInset;
-    const int editorWidth = frameWidth - editorInset * 2;
-    const POINT originClient{editorLeft + scale(12), editorTop + scale(9)};
+    const int padding = scale(10);
+    const int comboTop = textEditorFrame_.top + scale(26);
+    const int fontComboWidth = scale(270);
+    const int sizeComboWidth = scale(120);
+    const int fontComboLeft = textEditorFrame_.left + padding;
+    const int sizeComboLeft = fontComboLeft + fontComboWidth + scale(10);
+    const int editorHeight = scale(56);
+    const int editorLeft = textEditorFrame_.left + padding;
+    const int editorTop = textEditorFrame_.top + scale(66);
+    const int editorWidth = frameWidth - padding * 2;
+    const POINT originClient{editorLeft + scale(12), editorTop + scale(8)};
     textOrigin_ = relativePoint(desktopFromClient(originClient));
 
     if (textEditorBrush_) DeleteObject(textEditorBrush_);
     textEditorBrush_ = nullptr;
+    if (textControlsFont_) DeleteObject(textControlsFont_);
+    textControlsFont_ = CreateFontW(-scale(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                    L"Segoe UI Variable Text");
+    textFontCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"",
+                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+                                         CBS_DROPDOWNLIST | CBS_AUTOHSCROLL,
+                                     fontComboLeft, comboTop, fontComboWidth, scale(260),
+                                     hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(TextFontComboId)),
+                                     instance_, nullptr);
+    textSizeCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"",
+                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+                                     sizeComboLeft, comboTop, sizeComboWidth, scale(260),
+                                     hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(TextSizeComboId)),
+                                     instance_, nullptr);
     textEditor_ = CreateWindowExW(0, L"EDIT", L"",
                                   WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NOHIDESEL,
                                   editorLeft, editorTop, editorWidth, editorHeight,
                                   hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(TextEditorId)),
                                   instance_, nullptr);
     if (textEditor_) {
-        if (textEditorFont_) DeleteObject(textEditorFont_);
-        textEditorFont_ = CreateFontW(-scale(18), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                                      L"Segoe UI Variable Text");
+        if (textFontCombo_) {
+            for (const auto& family : InstalledFontFamilies(hwnd_))
+                SendMessageW(textFontCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(family.c_str()));
+            int selected = static_cast<int>(SendMessageW(textFontCombo_, CB_FINDSTRINGEXACT,
+                                                          static_cast<WPARAM>(-1),
+                                                          reinterpret_cast<LPARAM>(textFontFamily_.c_str())));
+            if (selected == CB_ERR) {
+                selected = static_cast<int>(SendMessageW(textFontCombo_, CB_ADDSTRING, 0,
+                                                          reinterpret_cast<LPARAM>(textFontFamily_.c_str())));
+            }
+            if (selected >= 0) SendMessageW(textFontCombo_, CB_SETCURSEL, selected, 0);
+            SendMessageW(textFontCombo_, WM_SETFONT, reinterpret_cast<WPARAM>(textControlsFont_), TRUE);
+            SetWindowSubclass(textFontCombo_, EditProc, 2, reinterpret_cast<DWORD_PTR>(hwnd_));
+        }
+        if (textSizeCombo_) {
+            int selected = 0;
+            for (std::size_t index = 0; index < TextSizeOptions.size(); ++index) {
+                const std::wstring size = std::to_wstring(TextSizeOptions[index]);
+                const int item = static_cast<int>(SendMessageW(textSizeCombo_, CB_ADDSTRING, 0,
+                                                                reinterpret_cast<LPARAM>(size.c_str())));
+                if (item >= 0) SendMessageW(textSizeCombo_, CB_SETITEMDATA, item, TextSizeOptions[index]);
+                if (TextSizeOptions[index] == textFontSize_) selected = item;
+            }
+            SendMessageW(textSizeCombo_, CB_SETCURSEL, selected, 0);
+            SendMessageW(textSizeCombo_, WM_SETFONT, reinterpret_cast<WPARAM>(textControlsFont_), TRUE);
+            SetWindowSubclass(textSizeCombo_, EditProc, 3, reinterpret_cast<DWORD_PTR>(hwnd_));
+        }
+        const bool dark = !IsHighContrastEnabled() && IsSystemDarkMode();
+        if (textFontCombo_) SetWindowTheme(textFontCombo_, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        if (textSizeCombo_) SetWindowTheme(textSizeCombo_, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        updateTextEditorFont();
         SetWindowTheme(textEditor_, L"", nullptr);
-        SendMessageW(textEditor_, WM_SETFONT, reinterpret_cast<WPARAM>(textEditorFont_), TRUE);
         SendMessageW(textEditor_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
                      MAKELPARAM(scale(10), scale(10)));
         const auto placeholder = Localized(StringId::TextInputPlaceholder, language_);
@@ -1290,7 +1428,28 @@ void OverlayWindow::beginText(POINT point) {
         InvalidateRect(hwnd_, &textEditorFrame_, FALSE);
         UpdateWindow(hwnd_);
         SetFocus(textEditor_);
+    } else {
+        if (textFontCombo_) DestroyWindow(textFontCombo_);
+        textFontCombo_ = nullptr;
+        if (textSizeCombo_) DestroyWindow(textSizeCombo_);
+        textSizeCombo_ = nullptr;
+        if (textControlsFont_) DeleteObject(textControlsFont_);
+        textControlsFont_ = nullptr;
+        textEditorFrame_ = {};
     }
+}
+
+void OverlayWindow::updateTextEditorFont() {
+    if (!textEditor_) return;
+    const wchar_t* family = textFontFamily_.empty() ? L"Segoe UI Variable Text" : textFontFamily_.c_str();
+    HFONT updated = CreateFontW(-scale(textFontSize_), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, family);
+    if (!updated) return;
+    SendMessageW(textEditor_, WM_SETFONT, reinterpret_cast<WPARAM>(updated), TRUE);
+    if (textEditorFont_) DeleteObject(textEditorFont_);
+    textEditorFont_ = updated;
+    InvalidateRect(textEditor_, nullptr, TRUE);
 }
 
 void OverlayWindow::commitText(bool cancel) {
@@ -1302,17 +1461,117 @@ void OverlayWindow::commitText(bool cancel) {
         GetWindowTextW(textEditor_, text.data(), length + 1); text.resize(length);
         if (!text.empty()) {
             annotations_.add(TextAnnotation{textOrigin_, std::move(text), AnnotationColors[colorIndex_],
-                                            static_cast<float>(scale(20))});
+                                            static_cast<float>(scale(textFontSize_)), textFontFamily_});
         }
     }
     RemoveWindowSubclass(textEditor_, EditProc, 1); DestroyWindow(textEditor_); textEditor_ = nullptr;
+    if (textFontCombo_) {
+        RemoveWindowSubclass(textFontCombo_, EditProc, 2);
+        DestroyWindow(textFontCombo_);
+    }
+    textFontCombo_ = nullptr;
+    if (textSizeCombo_) {
+        RemoveWindowSubclass(textSizeCombo_, EditProc, 3);
+        DestroyWindow(textSizeCombo_);
+    }
+    textSizeCombo_ = nullptr;
     if (textEditorFont_) DeleteObject(textEditorFont_);
     textEditorFont_ = nullptr;
+    if (textControlsFont_) DeleteObject(textControlsFont_);
+    textControlsFont_ = nullptr;
     if (textEditorBrush_) DeleteObject(textEditorBrush_);
     textEditorBrush_ = nullptr;
     textEditorFrame_ = {};
     InvalidateRect(hwnd_, &previousFrame, FALSE);
     SetFocus(hwnd_); rebuildButtons(); InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+RectI OverlayWindow::textBounds(const TextAnnotation& text) const {
+    int width = std::max(1, static_cast<int>(std::ceil(text.fontSize)));
+    int height = width;
+    if (hwnd_) {
+        if (HDC dc = GetDC(hwnd_)) {
+            HFONT font = CreateFontW(-std::max(1, static_cast<int>(std::lround(text.fontSize))),
+                                     0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                                     text.fontFamily.empty() ? L"Segoe UI Variable Text"
+                                                             : text.fontFamily.c_str());
+            if (font) {
+                const auto previousFont = SelectObject(dc, font);
+                SIZE extent{};
+                TEXTMETRICW metrics{};
+                if (!text.text.empty() &&
+                    GetTextExtentPoint32W(dc, text.text.c_str(), static_cast<int>(text.text.size()), &extent)) {
+                    width = std::max(1L, extent.cx);
+                }
+                if (GetTextMetricsW(dc, &metrics)) height = std::max(1L, metrics.tmHeight);
+                SelectObject(dc, previousFont);
+                DeleteObject(font);
+            }
+            ReleaseDC(hwnd_, dc);
+        }
+    }
+    const int left = selection_.left + static_cast<int>(std::lround(text.origin.x));
+    const int top = selection_.top + static_cast<int>(std::lround(text.origin.y));
+    return {left, top, left + width, top + height};
+}
+
+std::optional<std::size_t> OverlayWindow::textAt(POINT point) const {
+    const auto& items = annotations_.items();
+    for (std::size_t index = items.size(); index > 0; --index) {
+        const auto* text = std::get_if<TextAnnotation>(&items[index - 1]);
+        if (!text) continue;
+        RectI bounds = textBounds(*text);
+        const int padding = scale(6);
+        bounds.left -= padding;
+        bounds.top -= padding;
+        bounds.right += padding;
+        bounds.bottom += padding;
+        if (ContainsPoint(bounds, point.x, point.y)) return index - 1;
+    }
+    return std::nullopt;
+}
+
+void OverlayWindow::beginMovingText(std::size_t index, POINT point) {
+    if (index >= annotations_.items().size()) return;
+    const auto* text = std::get_if<TextAnnotation>(&annotations_.items()[index]);
+    if (!text) return;
+    movingTextIndex_ = index;
+    movingText_ = *text;
+    movingTextInitialOrigin_ = text->origin;
+    hoveredTextIndex_ = index;
+    dragStart_ = point;
+    dragKind_ = DragKind::MovingText;
+    SetCapture(hwnd_);
+    SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void OverlayWindow::updateMovingText(POINT point) {
+    if (!movingText_) return;
+    TextAnnotation candidate = *movingText_;
+    candidate.origin = {
+        movingTextInitialOrigin_.x + static_cast<float>(point.x - dragStart_.x),
+        movingTextInitialOrigin_.y + static_cast<float>(point.y - dragStart_.y)};
+    const RectI measured = textBounds(candidate);
+    const float maximumX = static_cast<float>(std::max(0, selection_.width() - measured.width()));
+    const float maximumY = static_cast<float>(std::max(0, selection_.height() - measured.height()));
+    candidate.origin.x = std::clamp(candidate.origin.x, 0.0f, maximumX);
+    candidate.origin.y = std::clamp(candidate.origin.y, 0.0f, maximumY);
+    if (candidate.origin.x == movingText_->origin.x && candidate.origin.y == movingText_->origin.y) return;
+    *movingText_ = std::move(candidate);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void OverlayWindow::finishMovingText(bool cancel) {
+    if (!cancel && movingText_ && movingTextIndex_ &&
+        (movingText_->origin.x != movingTextInitialOrigin_.x ||
+         movingText_->origin.y != movingTextInitialOrigin_.y)) {
+        annotations_.replace(*movingTextIndex_, Annotation{*movingText_});
+    }
+    movingText_.reset();
+    movingTextIndex_.reset();
 }
 
 bool OverlayWindow::perform(OverlayAction action) {
@@ -1538,7 +1797,8 @@ void OverlayWindow::paint() {
                                                  0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                                  CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                                                 L"Segoe UI Variable Text");
+                                                 item.fontFamily.empty() ? L"Segoe UI Variable Text"
+                                                                         : item.fontFamily.c_str());
                     const auto previousFont = SelectObject(dc, textFont);
                     RECT textRect{x + static_cast<int>(item.origin.x), y + static_cast<int>(item.origin.y),
                                   x + selection_.width(), y + selection_.height()};
@@ -1549,8 +1809,37 @@ void OverlayWindow::paint() {
                 SelectObject(dc, old); DeleteObject(pen);
             }, annotation);
         };
-        for (const auto& annotation : annotations_.items()) drawOne(annotation);
+        const auto& annotations = annotations_.items();
+        for (std::size_t index = 0; index < annotations.size(); ++index) {
+            if (movingTextIndex_ && *movingTextIndex_ == index && movingText_) continue;
+            drawOne(annotations[index]);
+        }
+        if (movingText_) drawOne(Annotation{*movingText_});
         if (draft_) drawOne(*draft_);
+        if (tool_ == AnnotationTool::Text && !textEditor_) {
+            const TextAnnotation* highlightedText = nullptr;
+            if (movingText_) highlightedText = &*movingText_;
+            else if (hoveredTextIndex_ && *hoveredTextIndex_ < annotations.size())
+                highlightedText = std::get_if<TextAnnotation>(&annotations[*hoveredTextIndex_]);
+            if (highlightedText) {
+                const RectI desktopBounds = textBounds(*highlightedText);
+                const POINT outlineTopLeft = clientFromDesktop({desktopBounds.left, desktopBounds.top});
+                const POINT outlineBottomRight = clientFromDesktop({desktopBounds.right, desktopBounds.bottom});
+                RECT outline{outlineTopLeft.x, outlineTopLeft.y,
+                             outlineBottomRight.x, outlineBottomRight.y};
+                InflateRect(&outline, scale(5), scale(4));
+                HPEN highlight = CreatePen(movingText_ ? PS_SOLID : PS_DOT,
+                                           movingText_ ? std::max(1, scale(2)) : 1,
+                                           highContrast ? GetSysColor(COLOR_HIGHLIGHT) : RGB(52, 152, 255));
+                const auto previousHighlightPen = SelectObject(dc, highlight);
+                const auto previousHighlightBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+                RoundRect(dc, outline.left, outline.top, outline.right, outline.bottom,
+                          scale(6), scale(6));
+                SelectObject(dc, previousHighlightBrush);
+                SelectObject(dc, previousHighlightPen);
+                DeleteObject(highlight);
+            }
+        }
         if (regionMode) DrawSelectionHandles(dc, selected, scale(4), highContrast);
     } else if (!regionMode) AlphaFill(dc, client, 105);
     drawMagnifier(dc, client);
@@ -1584,8 +1873,18 @@ void OverlayWindow::paint() {
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, highContrast ? GetSysColor(COLOR_WINDOWTEXT)
                                      : dark ? RGB(184, 186, 191) : RGB(96, 99, 104));
-        RECT hintRect{textEditorFrame_.left + scale(12), textEditorFrame_.top + scale(41),
-                      textEditorFrame_.right - scale(12), textEditorFrame_.bottom - scale(3)};
+        RECT fontLabelRect{textEditorFrame_.left + scale(10), textEditorFrame_.top + scale(6),
+                           textEditorFrame_.left + scale(280), textEditorFrame_.top + scale(24)};
+        RECT sizeLabelRect{textEditorFrame_.left + scale(290), textEditorFrame_.top + scale(6),
+                           textEditorFrame_.right - scale(10), textEditorFrame_.top + scale(24)};
+        const auto fontLabel = Localized(StringId::Font, language_);
+        const auto sizeLabel = Localized(StringId::FontSize, language_);
+        DrawTextW(dc, fontLabel.data(), static_cast<int>(fontLabel.size()), &fontLabelRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        DrawTextW(dc, sizeLabel.data(), static_cast<int>(sizeLabel.size()), &sizeLabelRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        RECT hintRect{textEditorFrame_.left + scale(12), textEditorFrame_.top + scale(126),
+                      textEditorFrame_.right - scale(12), textEditorFrame_.bottom - scale(6)};
         const auto hint = Localized(StringId::TextInputHint, language_);
         DrawTextW(dc, hint.data(), static_cast<int>(hint.size()), &hintRect,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);

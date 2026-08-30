@@ -67,11 +67,26 @@ void AnnotationTests() {
     document.add(PenStroke{{{0, 0}, {5, 5}}, {255, 0, 0, 255}, 2});
     document.add(ArrowAnnotation{{2, 2}, {8, 8}, {0, 255, 0, 255}, 4});
     document.add(RectangleAnnotation{{1, 1}, {10, 10}, {255, 0, 0, 255}, 2});
-    document.add(TextAnnotation{{3, 3}, L"HDR", {255, 255, 255, 255}, 14});
-    Check(document.items().size() == 4 && document.canUndo(), "adds all annotation types");
+    document.add(TextAnnotation{{3, 3}, L"HDR", {255, 255, 255, 255}, 24, L"Consolas"});
+    Check(document.items().size() == 4 && document.canUndo() &&
+          std::get<TextAnnotation>(document.items()[3]).fontSize == 24 &&
+          std::get<TextAnnotation>(document.items()[3]).fontFamily == L"Consolas",
+          "adds all annotation types and preserves text formatting");
+    Check(document.replace(3, TextAnnotation{{30, 20}, L"HDR", {255, 255, 255, 255}, 24, L"Consolas"}) &&
+          std::get<TextAnnotation>(document.items()[3]).origin.x == 30,
+          "moves an existing text annotation");
+    Check(document.undo() && std::get<TextAnnotation>(document.items()[3]).origin.x == 3,
+          "undoes text annotation movement");
+    Check(document.redo() && std::get<TextAnnotation>(document.items()[3]).origin.x == 30,
+          "redoes text annotation movement");
+    Check(document.undo() && std::get<TextAnnotation>(document.items()[3]).origin.x == 3,
+          "undoes text annotation movement after redo");
     Check(document.undo() && document.items().size() == 3 && document.canRedo(), "undoes annotation");
     Check(document.redo() && document.items().size() == 4, "redoes annotation");
     Check(!Localized(StringId::Capture, Language::SimplifiedChinese).empty() && Localized(StringId::Capture, Language::English) == L"Capture", "loads Chinese and English resources");
+    Check(Localized(StringId::Font, Language::SimplifiedChinese) == L"字体" &&
+          Localized(StringId::FontSize, Language::English) == L"Size",
+          "loads text formatting resources");
     Check(Localized(StringId::SettingsSubtitle, Language::English) == L"Personalize your capture experience" &&
           !Localized(StringId::CaptureControls, Language::SimplifiedChinese).empty() &&
           !Localized(StringId::Behavior, Language::SimplifiedChinese).empty() &&
