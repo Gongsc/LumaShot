@@ -15,6 +15,7 @@ The test executable covers negative-coordinate geometry and cropping, per-displa
 
 Repeat the following on single-SDR, single-HDR, and mixed HDR/SDR desktops, including 100%, 150%, and 200% display scaling where available:
 
+- Check overlay CPU use with the pointer stationary for 10 seconds, then moving the magnifier for 10 seconds, both before selecting a region and after selecting most of a 4K/multi-monitor desktop. Stationary-pointer messages must not continuously invalidate the magnifier; unchanged selections must reuse the masked preview. Resize/move/clear the selection and switch capture modes to confirm the previous bright region is dimmed correctly and the new region remains bright.
 - Exercise region, window, current-display, and all-display modes; include a cross-display region and a display with a negative virtual origin.
 - Leave **Press Enter to copy screenshot** enabled and confirm `Enter` copies and closes the overlay in every capture mode; in window mode, hover a window and confirm one press captures that window directly. Disable the option and confirm `Enter` does nothing while `Ctrl+C` still copies. While editing a text annotation, confirm the first `Enter` commits the text without copying and the next `Enter` copies the finished screenshot.
 - Move and resize the selection using every edge and corner. Confirm the cursor changes to four-way move, horizontal/vertical resize, and the matching diagonal resize cursor before and throughout each drag, and that output dimensions exactly match the selected physical pixels.

@@ -938,6 +938,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         POINT client = PointFromLParam(lparam);
         const bool previousMagnifierVisible = magnifierVisible();
         const POINT previousMouseClient = mouseClient_;
+        const bool pointerChanged = !mouseInside_ || client.x != mouseClient_.x || client.y != mouseClient_.y;
         mouseClient_ = client;
         mouseInside_ = true;
         const int hovered = buttonAt(client);
@@ -948,7 +949,7 @@ LRESULT OverlayWindow::handleMessage(UINT message, WPARAM wparam, LPARAM lparam)
             if (hovered >= 0) RedrawButtonNow(GetDlgItem(hwnd_, hovered));
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
-        if (previousMagnifierVisible || magnifierVisible()) {
+        if (pointerChanged && (previousMagnifierVisible || magnifierVisible())) {
             RECT clientBounds{};
             GetClientRect(hwnd_, &clientBounds);
             RECT dirty{};
@@ -1999,6 +2000,15 @@ void OverlayWindow::updateMaskedPreview() {
         maskedPreview_ = dimmedPreview_;
         maskedSelectionPixels_ = {};
     }
+    const RectI previewBounds{0, 0, static_cast<int>(preview_.width), static_cast<int>(preview_.height)};
+    const RectI selectedPixels = selection_.empty() || previewBounds.empty() ? RectI{} : ClampRect(
+        MapRectBetweenRects(selection_, frames_.virtualDesktop, previewBounds), previewBounds);
+    // Mouse/magnifier and toolbar paints do not change the selection. Keep the
+    // cached mask instead of copying a potentially multi-monitor selection twice.
+    if (selectedPixels.left == maskedSelectionPixels_.left &&
+        selectedPixels.top == maskedSelectionPixels_.top &&
+        selectedPixels.right == maskedSelectionPixels_.right &&
+        selectedPixels.bottom == maskedSelectionPixels_.bottom) return;
     const auto copyRows = [&](const ImageBgra8& source, RectI area) {
         if (area.empty()) return;
         const std::size_t rowBytes = static_cast<std::size_t>(area.width()) * 4;
@@ -2009,10 +2019,6 @@ void OverlayWindow::updateMaskedPreview() {
     };
     copyRows(dimmedPreview_, maskedSelectionPixels_);
     maskedSelectionPixels_ = {};
-    if (selection_.empty() || preview_.width == 0 || preview_.height == 0) return;
-    const RectI previewBounds{0, 0, static_cast<int>(preview_.width), static_cast<int>(preview_.height)};
-    const RectI selectedPixels = ClampRect(
-        MapRectBetweenRects(selection_, frames_.virtualDesktop, previewBounds), previewBounds);
     if (selectedPixels.empty()) return;
     copyRows(preview_, selectedPixels);
     maskedSelectionPixels_ = selectedPixels;
